@@ -14,6 +14,7 @@ import satori from "satori";
 import { Resvg } from "@resvg/resvg-js";
 import Jimp from "jimp";
 import { tokens as t } from "./tokens.js";
+import { getStaticTeamColor } from "./teamColors.js";
 import { getMetric } from "../fetch/keyring.js";
 import type { MetricConfig, RankedList, RankedRow } from "../types.js";
 // Mascot-only short names for the row label (Chicago Blackhawks -> Blackhawks).
@@ -114,6 +115,15 @@ function toLegibleHex(r: number, g: number, b: number): string {
   return hslToHex(h, Math.max(s, 0.35), Math.max(l, 0.5));
 }
 
+/** A static team color (see teamColors.ts) is the real brand hue but not
+ *  necessarily legible on the card's dark background at full strength (e.g.
+ *  Yankees navy) — routed through the same floor as an extracted color so
+ *  both sources render consistently. */
+function legibleHexFromHex(hex: string): string {
+  const n = parseInt(hex.slice(1), 16);
+  return toLegibleHex((n >> 16) & 255, (n >> 8) & 255, n & 255);
+}
+
 /** Turns a flat brand hue into a brushed-metal fill: same hue and a capped
  *  saturation (a fully-saturated team color reads as plastic, not metal),
  *  alternating light/dark lightness stops on a diagonal to fake the banding
@@ -200,7 +210,7 @@ interface RowVisual {
   accent: string | null;
 }
 
-async function resolveVisuals(rows: RankedRow[]): Promise<Map<string, RowVisual>> {
+async function resolveVisuals(rows: RankedRow[], orgSlug: string): Promise<Map<string, RowVisual>> {
   const entries = await Promise.all(
     rows.map(async (r): Promise<[string, RowVisual]> => {
       let image = r.logoUrl ? await fetchImage(r.logoUrl) : null;
@@ -210,9 +220,19 @@ async function resolveVisuals(rows: RankedRow[]): Promise<Map<string, RowVisual>
       if (!image && r.logoUrlFallback && r.logoUrlFallback !== r.logoUrl) {
         image = await fetchImage(r.logoUrlFallback);
       }
-      if (!image) return [r.entityId, { dataUri: null, accent: null }];
-      const dataUri = `data:${image.contentType};base64,${image.data.toString("base64")}`;
-      const accent = await extractAccentColor(image.data);
+      const dataUri = image ? `data:${image.contentType};base64,${image.data.toString("base64")}` : null;
+
+      // A known team's real color (see teamColors.ts) always wins over
+      // pixel-extraction from whatever avatar Socialpruf happened to cache —
+      // extraction is a guess, this isn't. Extraction only runs at all when
+      // there's no static entry (the "creators" org today).
+      const staticColor = getStaticTeamColor(orgSlug, r.name);
+      const accent = staticColor
+        ? legibleHexFromHex(staticColor)
+        : image
+          ? await extractAccentColor(image.data)
+          : null;
+
       return [r.entityId, { dataUri, accent }];
     }),
   );
@@ -678,7 +698,7 @@ async function loadFonts() {
 
 export async function renderCard(list: RankedList): Promise<{ svg: string; png: Buffer }> {
   const [visuals, fonts, brandLogo] = await Promise.all([
-    resolveVisuals(list.rows),
+    resolveVisuals(list.rows, list.spec.orgSlug),
     loadFonts(),
     loadBrandLogo(),
   ]);
