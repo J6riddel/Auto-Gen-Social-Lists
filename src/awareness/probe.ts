@@ -23,16 +23,18 @@ async function probeOrg(slug: string, expected: number): Promise<OrgCoverage> {
     const accounts = await listAccounts(slug);
     const platforms = [...new Set(accounts.map((a) => a.platform))].sort();
     const dates = accounts
-      .map((a) => a.followersAsOf)
-      .filter(Boolean)
+      .map((a) => a.lastSyncedAt?.slice(0, 10))
+      .filter((d): d is string => Boolean(d))
       .sort();
 
     const gaps: string[] = [];
     if (expected > 0 && accounts.length < expected) {
       gaps.push(`tracking ${accounts.length} of ${expected} expected accounts`);
     }
-    const stale = accounts.filter((a) => a.followersAsOf < todayISO()).length;
-    if (stale > 0) gaps.push(`${stale} accounts have stale follower snapshots`);
+    const stale = accounts.filter(
+      (a) => !a.lastSyncedAt || a.lastSyncedAt.slice(0, 10) < todayISO(),
+    ).length;
+    if (stale > 0) gaps.push(`${stale} accounts have stale or missing sync data`);
 
     return {
       slug,

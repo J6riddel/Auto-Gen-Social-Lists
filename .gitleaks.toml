@@ -9,8 +9,8 @@ useDefault = true
 [[rules]]
 id = "socialpruf-api-key"
 description = "Socialpruf API key"
-# TODO: replace with your real key prefix and length once confirmed.
-regex = '''sp_(live|test)_[A-Za-z0-9]{24,}'''
+# Confirmed against the real dev docs: keys start with sk_.
+regex = '''sk_[A-Za-z0-9]{20,}'''
 tags = ["key", "socialpruf"]
 
 [[rules]]
