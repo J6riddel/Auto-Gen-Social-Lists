@@ -1,0 +1,26 @@
+title = "socialpruf-list-bot"
+
+[extend]
+useDefault = true
+
+# GitHub's free secret scanning won't recognise a Socialpruf key format —
+# custom patterns are a paid org feature. This local rule is the free
+# equivalent, enforced pre-commit instead of server-side.
+[[rules]]
+id = "socialpruf-api-key"
+description = "Socialpruf API key"
+# TODO: replace with your real key prefix and length once confirmed.
+regex = '''sp_(live|test)_[A-Za-z0-9]{24,}'''
+tags = ["key", "socialpruf"]
+
+[[rules]]
+id = "socialpruf-key-assignment"
+description = "Socialpruf key assigned inline"
+regex = '''SP_KEY_[A-Z_]+\s*=\s*["']?[A-Za-z0-9_\-]{16,}'''
+tags = ["key", "socialpruf"]
+
+[allowlist]
+paths = [
+  '''\.env\.example$''',
+  '''\.gitleaks\.toml$''',
+]

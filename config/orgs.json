@@ -1,0 +1,43 @@
+{
+  "orgs": [
+    {
+      "slug": "nhl-league",
+      "label": "NHL Teams",
+      "keyEnv": "SP_KEY_NHL_LEAGUE",
+      "entityKind": "team",
+      "expectedEntityCount": 32,
+      "notes": "All 32 NHL club accounts. Primary platforms: X, Instagram, TikTok."
+    },
+    {
+      "slug": "creators",
+      "label": "Sports Creators",
+      "keyEnv": "SP_KEY_CREATORS",
+      "entityKind": "creator",
+      "expectedEntityCount": 0,
+      "notes": "Roster size varies. Fill expectedEntityCount after the first probe."
+    }
+  ],
+  "metrics": [
+    {
+      "id": "followers",
+      "label": "Followers",
+      "unit": "count",
+      "cadence": "daily snapshot",
+      "caveat": "Point-in-time. Do not mix platforms inside a single ranking."
+    },
+    {
+      "id": "emv",
+      "label": "EMV",
+      "unit": "usd",
+      "cadence": "per post, summable over a date range",
+      "caveat": "Model output, not observed spend. State the formula when posting."
+    },
+    {
+      "id": "engagement_rate",
+      "label": "Engagement rate",
+      "unit": "percent",
+      "cadence": "per post",
+      "caveat": "Denominator-sensitive and noisy. Prefer emv for ranking."
+    }
+  ]
+}

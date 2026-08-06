@@ -1,0 +1,28 @@
+{
+  "name": "socialpruf-list-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "generate": "tsx src/generate.ts",
+    "post": "tsx src/post/post.ts",
+    "probe": "tsx src/awareness/probe.ts",
+    "typecheck": "tsc --noEmit",
+    "prepare": "husky"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
+    "@resvg/resvg-js": "^2.6.2",
+    "dotenv": "^16.4.5",
+    "satori": "^0.10.13",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.3",
+    "husky": "^9.1.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}
