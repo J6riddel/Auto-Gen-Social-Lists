@@ -1,0 +1,67 @@
+name: Daily list
+
+on:
+  schedule:
+    - cron: "0 14 * * *" # 10am ET
+  workflow_dispatch:
+
+# Never use pull_request_target in this repo — it runs with secrets in the base
+# repo context, which is the known way public repos leak credentials.
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm generate
+        env:
+          SP_API_BASE: ${{ secrets.SP_API_BASE }}
+          SP_KEY_NHL_LEAGUE: ${{ secrets.SP_KEY_NHL_LEAGUE }}
+          SP_KEY_CREATORS: ${{ secrets.SP_KEY_CREATORS }}
+          SP_ANTHROPIC_KEY: ${{ secrets.SP_ANTHROPIC_KEY }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: card
+          path: output/
+          retention-days: 30
+
+  post:
+    needs: generate
+    runs-on: ubuntu-latest
+    # Add yourself as a required reviewer on this environment. The job pauses,
+    # you open the artifact, look at the card, and approve. Free on public repos
+    # and it gives you the human gate without needing to be at your laptop.
+    environment: publish
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: card
+          path: output/
+      - name: Post
+        run: |
+          DIR=$(ls -d output/*/ | head -1)
+          pnpm post "$DIR"
+        env:
+          DRY_RUN: "false"
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
