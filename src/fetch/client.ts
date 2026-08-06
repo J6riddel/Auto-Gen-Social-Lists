@@ -102,20 +102,24 @@ export interface FollowerRow {
   followers: number;
 }
 
-/** Current follower count per account on a platform. No date range — this is
- *  a point-in-time gauge, matching the "followers" metric's semantics
- *  (config/orgs.json requires dateRange to be null for it). statsByEntity
- *  doesn't expose a per-account handle, so handle is always null here. */
+/** Current follower count per account across one or more platforms. No date
+ *  range — this is a point-in-time gauge, matching the "followers" metric's
+ *  semantics (config/orgs.json requires dateRange to be null for it).
+ *  statsByEntity groups by account, and an account is single-platform, so a
+ *  multi-platform request returns one row per platform per underlying
+ *  entity — summing those into one ranked value is build.ts's job, not
+ *  this module's. statsByEntity doesn't expose a per-account handle, so
+ *  handle is always null here. */
 export async function fetchFollowers(
   orgSlug: string,
-  platform: string,
+  platforms: string[],
 ): Promise<FollowerRow[]> {
   const teamId = await teamIdFor(orgSlug);
   const { data } = await request<StatsByEntityResponse>({
     orgSlug,
     teamId,
     path: "/developer/v1/statsByEntity",
-    query: { groupBy: "account", platform },
+    query: { groupBy: "account", platform: platforms.join(",") },
   });
   return data.map((row) => ({
     id: row.id,
@@ -132,10 +136,11 @@ export interface EmvRow {
   emv: number;
 }
 
-/** EMV per account, summed over [start, end]. */
+/** EMV per account across one or more platforms, summed over [start, end].
+ *  Same one-row-per-platform-per-entity caveat as fetchFollowers applies. */
 export async function fetchEmvByEntity(
   orgSlug: string,
-  platform: string,
+  platforms: string[],
   start: string,
   end: string,
 ): Promise<EmvRow[]> {
@@ -144,7 +149,12 @@ export async function fetchEmvByEntity(
     orgSlug,
     teamId,
     path: "/developer/v1/statsByEntity",
-    query: { groupBy: "account", platform, fromDate: start, toDate: end },
+    query: {
+      groupBy: "account",
+      platform: platforms.join(","),
+      fromDate: start,
+      toDate: end,
+    },
   });
   return data.map((row) => ({
     entityId: row.id,

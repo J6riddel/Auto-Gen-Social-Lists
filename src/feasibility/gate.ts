@@ -19,10 +19,11 @@ export function checkFeasible(
   const org = packet.orgs.find((o) => o.slug === spec.orgSlug);
   if (!org) return { ok: false, reason: `org "${spec.orgSlug}" is not available today` };
 
-  if (!org.platforms.includes(spec.platform)) {
+  const missing = spec.platforms.filter((p) => !org.platforms.includes(p));
+  if (missing.length > 0) {
     return {
       ok: false,
-      reason: `org "${spec.orgSlug}" has no ${spec.platform} data (has: ${org.platforms.join(", ")})`,
+      reason: `org "${spec.orgSlug}" has no ${missing.join(", ")} data (has: ${org.platforms.join(", ")})`,
     };
   }
 

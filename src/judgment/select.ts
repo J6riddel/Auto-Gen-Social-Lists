@@ -33,7 +33,11 @@ fences. Shape:
 {
   "title": string,            // reads as a headline, under 70 chars
   "orgSlug": string,          // must appear in the packet
-  "platform": string,         // must appear in that org's platforms
+  "platforms": string[],      // each must appear in that org's platforms.
+                               // Length 1, or 3-4 — never 2 (see taste rules).
+                               // Every entity is ranked on the sum across this
+                               // exact set, so it must mean the same thing for
+                               // every entity in the list.
   "metric": "followers" | "emv",
   "dateRange": { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" } | null,
   "topN": number,             // 3-25

@@ -27,7 +27,7 @@ function footerLine(list: RankedList): string {
   const range = spec.dateRange
     ? `${spec.dateRange.start} to ${spec.dateRange.end}`
     : `as of ${list.queriedAt.slice(0, 10)}`;
-  return `socialpruf · ${spec.platform} · ${range} · n=${rows.length}`;
+  return `socialpruf · ${spec.platforms.join("+")} · ${range} · n=${rows.length}`;
 }
 
 function Card({ list }: { list: RankedList }) {

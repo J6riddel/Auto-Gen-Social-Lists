@@ -53,7 +53,17 @@ export interface AwarenessPacket {
 export const ListSpecSchema = z.object({
   title: z.string().min(4).max(70),
   orgSlug: z.string(),
-  platform: z.string(),
+  platforms: z
+    .array(z.string())
+    .min(1)
+    .max(4)
+    .refine((p) => p.length === 1 || p.length >= 3, {
+      message: "platforms must be exactly 1, or a consistent mix of 3-4 — never 2",
+    })
+    .describe(
+      "Every entity in the ranking is summed across the same platform set. " +
+        "config/taste.md's hard rule: one platform, or a 3-4 mix, never 2.",
+    ),
   metric: z.enum(["followers", "emv"]),
   dateRange: z
     .object({ start: z.string(), end: z.string() })
