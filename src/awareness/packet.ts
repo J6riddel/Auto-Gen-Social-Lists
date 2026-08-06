@@ -62,6 +62,7 @@ export async function buildPacket(): Promise<AwarenessPacket> {
         platforms: c.platforms,
         freshestDataDate: c.freshestDataDate,
         gaps: c.gaps,
+        ownAccountName: o.ownAccountName,
       };
     }),
     metrics: METRICS.filter((m) => m.id !== "engagement_rate"),

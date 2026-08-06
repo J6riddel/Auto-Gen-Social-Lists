@@ -4,7 +4,21 @@
  */
 
 import { fetchEmvByEntity, fetchFollowers } from "./client.js";
+import { getOrg } from "./keyring.js";
 import type { ListSpec, RankedList, RankedRow } from "../types.js";
+
+/** Drops the org's own umbrella account when judgment decided it isn't a
+ *  peer of the entities being ranked. Mechanical execution of a decision
+ *  judgment already made via spec.excludeOwnAccount — not itself a decision.
+ *  Case-insensitive since the API doesn't guarantee casing consistency
+ *  (confirmed: the same brand appeared as "nhl"/"NHL"/"@nhl" across
+ *  different platform-scoped calls before groupBy=brand fixed that). */
+function applyOwnAccountExclusion(rows: RankedRow[], spec: ListSpec): RankedRow[] {
+  if (!spec.excludeOwnAccount) return rows;
+  const ownAccountName = getOrg(spec.orgSlug).ownAccountName;
+  if (!ownAccountName) return rows;
+  return rows.filter((r) => r.name.toLowerCase() !== ownAccountName.toLowerCase());
+}
 
 export async function buildList(spec: ListSpec): Promise<RankedList> {
   let rows: RankedRow[];
@@ -37,6 +51,10 @@ export async function buildList(spec: ListSpec): Promise<RankedList> {
       end,
     };
   }
+
+  const beforeExclusion = rows.length;
+  rows = applyOwnAccountExclusion(rows, spec);
+  rawQuery.ownAccountExcluded = spec.excludeOwnAccount && rows.length < beforeExclusion;
 
   rows.sort((a, b) => (spec.sortDir === "desc" ? b.value - a.value : a.value - b.value));
 

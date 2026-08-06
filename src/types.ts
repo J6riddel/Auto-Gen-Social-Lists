@@ -9,6 +9,10 @@ export interface OrgConfig {
   entityKind: string;
   expectedEntityCount: number;
   notes: string;
+  /** The org's own umbrella account (e.g. a league's own account), if it has
+   *  one — tracked alongside individual entities but not a peer of them.
+   *  null for orgs with no such account (e.g. creators). */
+  ownAccountName: string | null;
 }
 
 export interface MetricConfig {
@@ -43,6 +47,7 @@ export interface AwarenessPacket {
     platforms: string[];
     freshestDataDate: string | null;
     gaps: string[];
+    ownAccountName: string | null;
   }>;
   metrics: MetricConfig[];
   recentPosts: Array<{ date: string; title: string; orgSlug: string }>;
@@ -65,6 +70,14 @@ export const ListSpecSchema = z.object({
         "config/taste.md's hard rule: one platform, or a 3-4 mix, never 2.",
     ),
   metric: z.enum(["followers", "emv"]),
+  excludeOwnAccount: z
+    .boolean()
+    .describe(
+      "Whether to drop the org's own umbrella account (packet.orgs[].ownAccountName, " +
+        "e.g. a league's own account) from this specific ranking. Not a fixed rule — " +
+        "it's a peer of nothing, so usually excluded from a ranking of individual " +
+        "entities, but judge it per list. No-op if the org has no ownAccountName.",
+    ),
   dateRange: z
     .object({ start: z.string(), end: z.string() })
     .nullable()

@@ -6,7 +6,8 @@
       "keyEnv": "SP_KEY_NHL_LEAGUE",
       "entityKind": "team",
       "expectedEntityCount": 132,
-      "notes": "132 tracked social accounts = 33 entities (32 clubs + the league account) x 4 platforms (instagram, tiktok, twitter, youtube). One account per platform per entity, not one row per team — confirmed via pnpm probe on 2026-08-06."
+      "notes": "132 tracked social accounts = 33 entities (32 clubs + the league account) x 4 platforms (instagram, tiktok, twitter, youtube). One account per platform per entity, not one row per team — confirmed via pnpm probe on 2026-08-06.",
+      "ownAccountName": "NHL"
     },
     {
       "slug": "creators",
@@ -14,7 +15,8 @@
       "keyEnv": "SP_KEY_CREATORS",
       "entityKind": "creator",
       "expectedEntityCount": 0,
-      "notes": "Roster size varies. Fill expectedEntityCount after the first probe."
+      "notes": "Roster size varies. Fill expectedEntityCount after the first probe.",
+      "ownAccountName": null
     }
   ],
   "metrics": [

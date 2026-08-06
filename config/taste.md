@@ -26,6 +26,17 @@ in the replies costs more than a ranking that never shipped.
   posting volume, wildly different account ages) without saying so.
 - The angle depends on a caveat too long to fit on the card.
 
+## Judgment calls, not hard rules
+
+- An org's own umbrella account (e.g. the league itself, sitting next to its
+  teams) usually isn't a peer of the entities you're ranking — it's closer to
+  the sum of many of them, so comparing it against individual teams is
+  usually apples to oranges. Default to excluding it from a "which team/
+  creator is biggest" list. But if the actual story is the umbrella account
+  itself (how big is the league's own following, how has it grown), include
+  it — that's a different, legitimate list. Decide per list; don't default
+  blindly either way.
+
 ## Hard rules
 
 - Never invent, round for effect, or estimate a value. The card shows what the

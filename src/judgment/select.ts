@@ -39,6 +39,7 @@ fences. Shape:
                                // exact set, so it must mean the same thing for
                                // every entity in the list.
   "metric": "followers" | "emv",
+  "excludeOwnAccount": boolean, // see below
   "dateRange": { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" } | null,
   "topN": number,             // 3-25
   "sortDir": "desc" | "asc",
@@ -48,7 +49,16 @@ fences. Shape:
 
 dateRange must be null when metric is "followers" (it is a point-in-time
 snapshot) and must be set when metric is "emv". Never end a date range later
-than the org's freshestDataDate.`;
+than the org's freshestDataDate.
+
+Some orgs track an umbrella account alongside their individual entities — the
+packet's ownAccountName field on that org, if not null (e.g. a league's own
+account sitting next to its teams). It isn't a peer of the entities you're
+ranking, so it usually doesn't belong in a "which team/creator is biggest"
+list — set excludeOwnAccount to true for those. But this is a judgment call,
+not a fixed rule: if the list is explicitly about comparing the umbrella
+account too (or the org has no ownAccountName), decide accordingly. Always
+set this field; it's a no-op if the org has no ownAccountName.`;
 }
 
 export async function selectList(
