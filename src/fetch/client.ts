@@ -102,14 +102,21 @@ export interface FollowerRow {
   followers: number;
 }
 
-/** Current follower count per account across one or more platforms. No date
+/** Current follower count per entity across one or more platforms. No date
  *  range — this is a point-in-time gauge, matching the "followers" metric's
  *  semantics (config/orgs.json requires dateRange to be null for it).
- *  statsByEntity groups by account, and an account is single-platform, so a
- *  multi-platform request returns one row per platform per underlying
- *  entity — summing those into one ranked value is build.ts's job, not
- *  this module's. statsByEntity doesn't expose a per-account handle, so
- *  handle is always null here. */
+ *
+ *  Grouped by brand, not account: an account is single-platform, and a
+ *  brand's display name is inconsistent per platform ("nhl" on one, "NHL"
+ *  on another, "@nhl" on a third — confirmed against real data), so
+ *  grouping by account and re-joining client-side by name silently
+ *  fragmented one entity into several. groupBy=brand sums across the
+ *  requested platforms server-side instead, which is both correct and
+ *  simpler. Assumes this org's rankable entities are Socialpruf brands —
+ *  true for nhl-league (verified: 33 brands = 32 clubs + the league
+ *  account), unverified for entityKind "creator" since no key is
+ *  configured for that org yet. statsByEntity doesn't expose a per-entity
+ *  handle, so handle is always null here. */
 export async function fetchFollowers(
   orgSlug: string,
   platforms: string[],
@@ -119,7 +126,7 @@ export async function fetchFollowers(
     orgSlug,
     teamId,
     path: "/developer/v1/statsByEntity",
-    query: { groupBy: "account", platform: platforms.join(",") },
+    query: { groupBy: "brand", platform: platforms.join(",") },
   });
   return data.map((row) => ({
     id: row.id,
@@ -136,8 +143,8 @@ export interface EmvRow {
   emv: number;
 }
 
-/** EMV per account across one or more platforms, summed over [start, end].
- *  Same one-row-per-platform-per-entity caveat as fetchFollowers applies. */
+/** EMV per entity across one or more platforms, summed over [start, end].
+ *  Same groupBy=brand reasoning as fetchFollowers applies. */
 export async function fetchEmvByEntity(
   orgSlug: string,
   platforms: string[],
@@ -150,7 +157,7 @@ export async function fetchEmvByEntity(
     teamId,
     path: "/developer/v1/statsByEntity",
     query: {
-      groupBy: "account",
+      groupBy: "brand",
       platform: platforms.join(","),
       fromDate: start,
       toDate: end,
