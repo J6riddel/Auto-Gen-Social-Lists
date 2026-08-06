@@ -5,8 +5,8 @@
       "label": "NHL Teams",
       "keyEnv": "SP_KEY_NHL_LEAGUE",
       "entityKind": "team",
-      "expectedEntityCount": 32,
-      "notes": "All 32 NHL club accounts. Primary platforms: X, Instagram, TikTok."
+      "expectedEntityCount": 132,
+      "notes": "132 tracked social accounts = 33 entities (32 clubs + the league account) x 4 platforms (instagram, tiktok, twitter, youtube). One account per platform per entity, not one row per team — confirmed via pnpm probe on 2026-08-06."
     },
     {
       "slug": "creators",
@@ -23,7 +23,7 @@
       "label": "Followers",
       "unit": "count",
       "cadence": "daily snapshot",
-      "caveat": "Point-in-time. Do not mix platforms inside a single ranking."
+      "caveat": "Point-in-time. One platform, or the same 3-4 platform mix for every entity in the ranking — never a 2-platform mix, and never a different mix per entity."
     },
     {
       "id": "emv",

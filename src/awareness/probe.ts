@@ -8,6 +8,7 @@
  */
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import { configuredOrgs } from "../fetch/keyring.js";
 import { listAccounts } from "../fetch/client.js";
 import type { OrgCoverage } from "../types.js";
@@ -82,6 +83,10 @@ export async function probeAll(useCache = true): Promise<OrgCoverage[]> {
 }
 
 // `pnpm probe` — useful on its own when you want to see what's actually there.
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Compare via pathToFileURL, not a raw `file://${...}` template — argv[1] is
+// an OS path (backslashes on Windows, unescaped spaces), not a URL, so a
+// naive string comparison silently never matches there and the block never
+// runs.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   probeAll(false).then((c) => console.log(JSON.stringify(c, null, 2)));
 }
