@@ -3,7 +3,7 @@
  * list is; this decides nothing and just goes and gets it.
  */
 
-import { fetchEmvByEntity, fetchFollowers } from "./client.js";
+import { fetchEmvByEntity, fetchFollowers, fetchInstagramLogosByName, normalizeBrandName } from "./client.js";
 import { getOrg } from "./keyring.js";
 import type { ListSpec, RankedList, RankedRow } from "../types.js";
 
@@ -25,22 +25,32 @@ export async function buildList(spec: ListSpec): Promise<RankedList> {
   let rawQuery: Record<string, unknown>;
 
   if (spec.metric === "followers") {
-    const accounts = await fetchFollowers(spec.orgSlug, spec.platforms);
+    const [accounts, instagramLogos] = await Promise.all([
+      fetchFollowers(spec.orgSlug, spec.platforms),
+      fetchInstagramLogosByName(spec.orgSlug),
+    ]);
     rows = accounts.map((a) => ({
       entityId: a.id,
       name: a.name,
       handle: a.handle,
       value: a.followers,
+      logoUrl: a.logoUrl,
+      logoUrlFallback: instagramLogos.get(normalizeBrandName(a.name)) ?? null,
     }));
     rawQuery = { route: "followers", org: spec.orgSlug, platforms: spec.platforms };
   } else {
     const { start, end } = spec.dateRange!;
-    const emv = await fetchEmvByEntity(spec.orgSlug, spec.platforms, start, end);
+    const [emv, instagramLogos] = await Promise.all([
+      fetchEmvByEntity(spec.orgSlug, spec.platforms, start, end),
+      fetchInstagramLogosByName(spec.orgSlug),
+    ]);
     rows = emv.map((r) => ({
       entityId: r.entityId,
       name: r.name,
       handle: r.handle,
       value: r.emv,
+      logoUrl: r.logoUrl,
+      logoUrlFallback: instagramLogos.get(normalizeBrandName(r.name)) ?? null,
     }));
     rawQuery = {
       route: "stats/by-entity",

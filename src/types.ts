@@ -101,6 +101,11 @@ export interface RankedRow {
   name: string;
   handle: string | null;
   value: number;
+  logoUrl: string | null;
+  /** Instagram avatar for the same brand, matched by name — tried by the
+   *  renderer only if logoUrl fails (dead, or an unsupported format like the
+   *  WebP TikTok sometimes serves). null if no match or already Instagram. */
+  logoUrlFallback: string | null;
 }
 
 export interface RankedList {

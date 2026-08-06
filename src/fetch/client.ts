@@ -89,10 +89,50 @@ interface StatsByEntityRow {
   name: string;
   platform: string;
   metrics: { followers: number; emv: number; [key: string]: number };
+  // Socialpruf's own re-hosted copy (cdn.socialpruf.com) — stable, unlike the
+  // signed/expiring URLs on each platform's own CDN nested under `accounts`,
+  // which aren't safe to embed since they go stale. Confirmed populated on
+  // real brand-grouped rows despite the generic docs example showing null.
+  cdnProfileImageUrl: string | null;
 }
 
 interface StatsByEntityResponse {
   data: StatsByEntityRow[];
+}
+
+/** Loose match key for joining a brand-grouped row's name to an account-
+ *  grouped row's name — the two aren't guaranteed identical casing/decoration
+ *  (confirmed: the league's own account showed up as "nhl"/"NHL"/"@nhl"
+ *  across platforms), so this is intentionally forgiving. Only used for the
+ *  logo fallback below, never for anything numeric. */
+export function normalizeBrandName(name: string): string {
+  return name.trim().toLowerCase().replace(/^@/, "");
+}
+
+/** Instagram avatars keyed by normalized name — a fallback logo source.
+ *  statsByEntity's brand-grouped cdnProfileImageUrl is whatever image
+ *  Socialpruf has cached for the brand, which empirically isn't necessarily
+ *  Instagram's own even when the query was scoped to platform=instagram
+ *  (confirmed: a real instagram-only followers run still returned a TikTok —
+ *  WebP, unrenderable by Satori — image for several teams). Querying
+ *  groupBy=account scoped to platform=instagram instead returns each
+ *  account's own image, guaranteed Instagram-sourced. There's no shared
+ *  brand id at the account level to join on, so this matches by name — good
+ *  enough for team names in practice, even though name-matching is exactly
+ *  what groupBy=brand exists to avoid for numeric stats. */
+export async function fetchInstagramLogosByName(orgSlug: string): Promise<Map<string, string>> {
+  const teamId = await teamIdFor(orgSlug);
+  const { data } = await request<StatsByEntityResponse>({
+    orgSlug,
+    teamId,
+    path: "/developer/v1/statsByEntity",
+    query: { groupBy: "account", platform: "instagram" },
+  });
+  const map = new Map<string, string>();
+  for (const row of data) {
+    if (row.cdnProfileImageUrl) map.set(normalizeBrandName(row.name), row.cdnProfileImageUrl);
+  }
+  return map;
 }
 
 export interface FollowerRow {
@@ -100,6 +140,7 @@ export interface FollowerRow {
   name: string;
   handle: string | null;
   followers: number;
+  logoUrl: string | null;
 }
 
 /** Current follower count per entity across one or more platforms. No date
@@ -133,6 +174,7 @@ export async function fetchFollowers(
     name: row.name,
     handle: null,
     followers: row.metrics.followers,
+    logoUrl: row.cdnProfileImageUrl,
   }));
 }
 
@@ -141,6 +183,7 @@ export interface EmvRow {
   name: string;
   handle: string | null;
   emv: number;
+  logoUrl: string | null;
 }
 
 /** EMV per entity across one or more platforms, summed over [start, end].
@@ -168,5 +211,6 @@ export async function fetchEmvByEntity(
     name: row.name,
     handle: null,
     emv: row.metrics.emv,
+    logoUrl: row.cdnProfileImageUrl,
   }));
 }
