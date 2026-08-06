@@ -15,34 +15,42 @@ import type { AwarenessPacket, MetricConfig, OrgConfig } from "../types.js";
 const ORGS = orgsConfig.orgs as OrgConfig[];
 const METRICS = orgsConfig.metrics as MetricConfig[];
 
-/** Reads the last N receipts so judgment can avoid repeating itself. */
+/**
+ * Reads the last N receipts so judgment can avoid repeating itself. Directory
+ * names all share the same YYYY-MM-DD prefix on a day with multiple runs, so
+ * sorting by name degenerates into sorting by slug text — not by recency.
+ * Sort by the receipt's own generatedAt instead, so "recent" means recent.
+ */
 async function recentPosts(limit = 10) {
   try {
     const dirs = (await readdir("output", { withFileTypes: true }))
       .filter((d) => d.isDirectory())
-      .map((d) => d.name)
-      .sort()
-      .reverse()
-      .slice(0, limit);
+      .map((d) => d.name);
 
-    const out = [];
+    const receipts = [];
     for (const dir of dirs) {
       try {
         const receipt = JSON.parse(
           await readFile(`output/${dir}/receipt.json`, "utf8"),
         );
-        out.push({
-          date: receipt.generatedAt?.slice(0, 10) ?? dir.slice(0, 10),
-          title: receipt.spec.title,
-          orgSlug: receipt.spec.orgSlug,
-          metric: receipt.spec.metric,
-          platforms: receipt.spec.platforms,
-        });
+        receipts.push({ dir, receipt });
       } catch {
         // skip malformed
       }
     }
-    return out;
+
+    return receipts
+      .sort((a, b) =>
+        (b.receipt.generatedAt ?? "").localeCompare(a.receipt.generatedAt ?? ""),
+      )
+      .slice(0, limit)
+      .map(({ dir, receipt }) => ({
+        date: receipt.generatedAt?.slice(0, 10) ?? dir.slice(0, 10),
+        title: receipt.spec.title,
+        orgSlug: receipt.spec.orgSlug,
+        metric: receipt.spec.metric,
+        platforms: receipt.spec.platforms,
+      }));
   } catch {
     return [];
   }
