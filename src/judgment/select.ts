@@ -28,9 +28,13 @@ Editorial standard you are being judged against:
 ${taste}
 
 Respond with a single JSON object and nothing else — no prose, no markdown
-fences. Shape:
+fences. Write "reasoning" first and let it drive the fields that follow —
+don't decide the list first and rationalize it after. Shape:
 
 {
+  "reasoning": string,         // under 500 chars. What the packet supports, why
+                               // this org/angle over the alternatives, any
+                               // coverage or platform-count tradeoff you weighed.
   "title": string,            // reads as a headline, under 70 chars
   "orgSlug": string,          // must appear in the packet
   "platforms": string[],      // each must appear in that org's platforms.
@@ -41,7 +45,7 @@ fences. Shape:
   "metric": "followers" | "emv",
   "excludeOwnAccount": boolean, // see below
   "dateRange": { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" } | null,
-  "topN": number,             // 3-25
+  "topN": number,             // even, 4-24 (odd counts split into uneven card columns)
   "sortDir": "desc" | "asc",
   "angle": string,            // why this is worth posting, under 280 chars
   "caveat": string | null     // shown on the card footer, under 120 chars
@@ -74,9 +78,17 @@ export async function selectList(
   const res = await client.messages.create({
     model: MODEL,
     max_tokens: 1000,
+    // claude-sonnet-5 does extended thinking by default, and that budget is
+    // carved out of max_tokens — a long thinking pass can eat the whole
+    // budget and leave no room for the JSON. The "reasoning" field above is
+    // the deliberation step instead: it's visible, bounded, lands in the
+    // receipt, and costs ordinary output tokens instead of an opaque
+    // thinking budget. This SDK predates the `thinking` param, so it's
+    // passed through untyped.
+    thinking: { type: "disabled" },
     system: systemPrompt(taste),
     messages: [{ role: "user", content: userContent }],
-  });
+  } as Anthropic.MessageCreateParamsNonStreaming);
 
   const text = res.content
     .filter((b): b is Anthropic.TextBlock => b.type === "text")

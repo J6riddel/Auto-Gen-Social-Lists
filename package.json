@@ -8,6 +8,7 @@
   },
   "scripts": {
     "generate": "tsx src/generate.ts",
+    "preview": "tsx watch src/render/preview.ts",
     "post": "tsx src/post/post.ts",
     "probe": "tsx src/awareness/probe.ts",
     "typecheck": "tsc --noEmit",

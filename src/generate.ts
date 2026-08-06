@@ -36,7 +36,18 @@ async function main() {
   const usages: unknown[] = [];
 
   for (let attempt = 1; attempt <= MAX_JUDGMENT_ATTEMPTS; attempt++) {
-    const result = await selectList(packet, rejection);
+    let result: Awaited<ReturnType<typeof selectList>>;
+    try {
+      result = await selectList(packet, rejection);
+    } catch (err) {
+      // A malformed or schema-invalid response is the same class of problem
+      // as an infeasible one: judgment proposed something unusable. Give it
+      // the same named-reason retry instead of crashing the run.
+      const reason = err instanceof Error ? err.message : String(err);
+      console.log(`  attempt ${attempt} invalid: ${reason}`);
+      rejection = reason;
+      continue;
+    }
     usages.push(result.usage);
     const gate = checkFeasible(result.spec, packet);
     if (gate.ok) {

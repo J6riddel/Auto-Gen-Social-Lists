@@ -15,173 +15,11 @@ import { Resvg } from "@resvg/resvg-js";
 import Jimp from "jimp";
 import { tokens as t } from "./tokens.js";
 import type { RankedList, RankedRow } from "../types.js";
-
-// Display-only: the card shows the mascot, not the city (Chicago Blackhawks
-// -> Blackhawks). Dropping the first word breaks on multi-word cities (Tampa
-// Bay, New York, Los Angeles, St. Louis) and multi-word mascots (Blue
-// Jackets, Golden Knights, Maple Leafs, Red Wings) alike, so this is a real
-// lookup table rather than a heuristic. row.name itself is untouched — the
-// footer's n= line, the receipt, and the caption all still need the full
-// official name; only the row label shortens. An unmatched name (a
-// non-NHL org, or a name typo'd differently than expected) just falls back
-// to the full name unchanged, same "degrade, don't break" pattern as a dead
-// logo URL.
-const NHL_SHORT_NAMES: Record<string, string> = {
-  "anaheim ducks": "Ducks",
-  "arizona coyotes": "Coyotes",
-  "boston bruins": "Bruins",
-  "buffalo sabres": "Sabres",
-  "calgary flames": "Flames",
-  "carolina hurricanes": "Hurricanes",
-  "chicago blackhawks": "Blackhawks",
-  "colorado avalanche": "Avalanche",
-  "columbus blue jackets": "Blue Jackets",
-  "dallas stars": "Stars",
-  "detroit red wings": "Red Wings",
-  "edmonton oilers": "Oilers",
-  "florida panthers": "Panthers",
-  "los angeles kings": "Kings",
-  "minnesota wild": "Wild",
-  "montreal canadiens": "Canadiens",
-  "nashville predators": "Predators",
-  "new jersey devils": "Devils",
-  "new york islanders": "Islanders",
-  "new york rangers": "Rangers",
-  "ottawa senators": "Senators",
-  "philadelphia flyers": "Flyers",
-  "pittsburgh penguins": "Penguins",
-  "san jose sharks": "Sharks",
-  "seattle kraken": "Kraken",
-  "st. louis blues": "Blues",
-  "st louis blues": "Blues",
-  "tampa bay lightning": "Lightning",
-  "toronto maple leafs": "Maple Leafs",
-  "utah hockey club": "Hockey Club",
-  "utah mammoth": "Mammoth",
-  "vancouver canucks": "Canucks",
-  "vegas golden knights": "Golden Knights",
-  "washington capitals": "Capitals",
-  "winnipeg jets": "Jets",
-};
-
-const NFL_SHORT_NAMES: Record<string, string> = {
-  "arizona cardinals": "Cardinals",
-  "atlanta falcons": "Falcons",
-  "baltimore ravens": "Ravens",
-  "buffalo bills": "Bills",
-  "carolina panthers": "Panthers",
-  "chicago bears": "Bears",
-  "cincinnati bengals": "Bengals",
-  "cleveland browns": "Browns",
-  "dallas cowboys": "Cowboys",
-  "denver broncos": "Broncos",
-  "detroit lions": "Lions",
-  "green bay packers": "Packers",
-  "houston texans": "Texans",
-  "indianapolis colts": "Colts",
-  "jacksonville jaguars": "Jaguars",
-  "kansas city chiefs": "Chiefs",
-  "las vegas raiders": "Raiders",
-  "los angeles chargers": "Chargers",
-  "los angeles rams": "Rams",
-  "miami dolphins": "Dolphins",
-  "minnesota vikings": "Vikings",
-  "new england patriots": "Patriots",
-  "new orleans saints": "Saints",
-  "new york giants": "Giants",
-  "new york jets": "Jets",
-  "philadelphia eagles": "Eagles",
-  "pittsburgh steelers": "Steelers",
-  "san francisco 49ers": "49ers",
-  "seattle seahawks": "Seahawks",
-  "tampa bay buccaneers": "Buccaneers",
-  "tennessee titans": "Titans",
-  "washington commanders": "Commanders",
-};
-
-const NBA_SHORT_NAMES: Record<string, string> = {
-  "atlanta hawks": "Hawks",
-  "boston celtics": "Celtics",
-  "brooklyn nets": "Nets",
-  "charlotte hornets": "Hornets",
-  "chicago bulls": "Bulls",
-  "cleveland cavaliers": "Cavaliers",
-  "dallas mavericks": "Mavericks",
-  "denver nuggets": "Nuggets",
-  "detroit pistons": "Pistons",
-  "golden state warriors": "Warriors",
-  "houston rockets": "Rockets",
-  "indiana pacers": "Pacers",
-  "los angeles clippers": "Clippers",
-  "los angeles lakers": "Lakers",
-  "memphis grizzlies": "Grizzlies",
-  "miami heat": "Heat",
-  "milwaukee bucks": "Bucks",
-  "minnesota timberwolves": "Timberwolves",
-  "new orleans pelicans": "Pelicans",
-  "new york knicks": "Knicks",
-  "oklahoma city thunder": "Thunder",
-  "orlando magic": "Magic",
-  "philadelphia 76ers": "76ers",
-  "phoenix suns": "Suns",
-  "portland trail blazers": "Trail Blazers",
-  "sacramento kings": "Kings",
-  "san antonio spurs": "Spurs",
-  "toronto raptors": "Raptors",
-  "utah jazz": "Jazz",
-  "washington wizards": "Wizards",
-};
-
-const MLB_SHORT_NAMES: Record<string, string> = {
-  "arizona diamondbacks": "Diamondbacks",
-  "atlanta braves": "Braves",
-  "baltimore orioles": "Orioles",
-  "boston red sox": "Red Sox",
-  "chicago cubs": "Cubs",
-  "chicago white sox": "White Sox",
-  "cincinnati reds": "Reds",
-  "cleveland guardians": "Guardians",
-  "colorado rockies": "Rockies",
-  "detroit tigers": "Tigers",
-  "houston astros": "Astros",
-  "kansas city royals": "Royals",
-  "los angeles angels": "Angels",
-  "los angeles dodgers": "Dodgers",
-  "miami marlins": "Marlins",
-  "milwaukee brewers": "Brewers",
-  "minnesota twins": "Twins",
-  "new york mets": "Mets",
-  "new york yankees": "Yankees",
-  "oakland athletics": "Athletics",
-  athletics: "Athletics", // mid-relocation, no city in the official name
-  "philadelphia phillies": "Phillies",
-  "pittsburgh pirates": "Pirates",
-  "san diego padres": "Padres",
-  "san francisco giants": "Giants",
-  "seattle mariners": "Mariners",
-  "st. louis cardinals": "Cardinals",
-  "st louis cardinals": "Cardinals",
-  "tampa bay rays": "Rays",
-  "texas rangers": "Rangers",
-  "toronto blue jays": "Blue Jays",
-  "washington nationals": "Nationals",
-};
-
-// Merged across leagues rather than kept as four lookups picked by org — full
-// team names don't collide across leagues (every "New York ___"/"Los Angeles
-// ___"/"Washington ___" etc. has a different mascot), so one flat table keeps
-// displayName ignorant of which league it's rendering, same as it already is
-// ignorant of which org.
-const TEAM_SHORT_NAMES: Record<string, string> = {
-  ...NHL_SHORT_NAMES,
-  ...NFL_SHORT_NAMES,
-  ...NBA_SHORT_NAMES,
-  ...MLB_SHORT_NAMES,
-};
-
-function displayName(name: string): string {
-  return TEAM_SHORT_NAMES[name.trim().toLowerCase()] ?? name;
-}
+// Mascot-only short names for the row label (Chicago Blackhawks -> Blackhawks).
+// Shared with fetch/client.ts, which uses the same table to join a
+// brand-grouped entity name to an Instagram-grouped one when the two queries
+// don't agree on full-vs-short form for the same team.
+import { displayTeamName as displayName } from "../teamNames.js";
 
 function formatValue(value: number, metric: string): string {
   if (metric === "emv") {
@@ -266,21 +104,21 @@ function toLegibleHex(r: number, g: number, b: number): string {
   return hslToHex(h, Math.max(s, 0.35), Math.max(l, 0.5));
 }
 
-/** WCAG relative luminance, used to pick legible text over an arbitrary
- *  accent fill — toLegibleHex only floors lightness/saturation in HSL terms,
- *  which doesn't track perceived brightness across hues (a floored yellow
- *  reads much brighter than a floored blue at the same HSL lightness). */
-function relativeLuminance(hex: string): number {
+/** Turns a flat brand hue into a brushed-metal fill: same hue and a capped
+ *  saturation (a fully-saturated team color reads as plastic, not metal),
+ *  alternating light/dark lightness stops on a diagonal to fake the banding
+ *  a real reflective surface would pick up. Used for every row's fill now,
+ *  not just the leader's — accentColor already falls back to t.color.accent
+ *  upstream when a row has no logo to pull a hue from. */
+function metallicGradient(hex: string): string {
   const n = parseInt(hex.slice(1), 16);
-  const lin = (c: number) => {
-    const s = c / 255;
-    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-  };
-  return 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
-}
-
-function textColorFor(bgHex: string): string {
-  return relativeLuminance(bgHex) > 0.4 ? "#14141A" : "#F5F6F8";
+  const [h, s] = rgbToHsl((n >> 16) & 255, (n >> 8) & 255, n & 255);
+  const cappedS = Math.min(s, 0.5);
+  const stop = (l: number) => hslToHex(h, cappedS, l);
+  return (
+    `linear-gradient(135deg, ${stop(0.74)} 0%, ${stop(0.36)} 22%, ` +
+    `${stop(0.6)} 45%, ${stop(0.28)} 68%, ${stop(0.7)} 88%, ${stop(0.4)} 100%)`
+  );
 }
 
 /** Picks the most saturated pixel in a downscaled logo as "the" brand color
@@ -438,20 +276,28 @@ function Row({
   logoDataUri: string | null;
   accentColor: string | null;
 }) {
-  const isLeader = rank === 1;
-  // The row itself fills with the entity's extracted color now, not just its
-  // numbers — the old "gold text for #1" scheme only applies when a row has
-  // no extracted color to work with. Text on top of an accent fill needs its
-  // own contrast pick (textColorFor), not the fixed light/dim palette.
-  const rowBg = accentColor ?? (isLeader ? t.color.surface : "transparent");
-  const onAccent = accentColor ? textColorFor(accentColor) : null;
-  const rankColor = onAccent ?? (isLeader ? t.color.accent : t.color.dim);
-  const nameColor = onAccent ?? t.color.text;
-  const valueColor = onAccent ?? (isLeader ? t.color.accent : t.color.text);
+  // Every row now fills with a brushed-metal gradient built off the entity's
+  // extracted brand hue (or t.color.accent when a row has no logo/color to
+  // pull from — see extractAccentColor). Row text is pinned to white
+  // regardless of that fill's contrast pick.
+  const baseHue = accentColor ?? t.color.accent;
+  const nameColor = "#FFFFFF";
+  const valueColor = "#FFFFFF";
   // Scaled off the row's own height, not a fixed pixel value, so the corner
   // reads the same proportionally whether rows are stretched tall (a short
   // list) or compact (two-column mode).
   const radius = Math.max(6, Math.round(metrics.rowH * 0.16));
+  const borderWidth = Math.max(1, Math.round(metrics.rowH * 0.02));
+
+  // Logo panel is a hard square, exactly the row's height — "fills the left
+  // square portion" — with its right edge cut on a diagonal instead of
+  // running straight down. The row's own overflow: hidden + borderRadius
+  // below is what rounds the panel's top-left/bottom-left corners to match
+  // the pill, rather than duplicating the radius on the panel itself.
+  const logoSize = metrics.rowH;
+  const slash = Math.round(logoSize * 0.24);
+  const numberSize = Math.max(14, Math.round(logoSize * 0.32));
+  const numberInset = Math.max(4, Math.round(logoSize * 0.09));
 
   return (
     <div
@@ -459,47 +305,92 @@ function Row({
       style={{
         display: "flex",
         alignItems: "center",
+        position: "relative",
+        overflow: "hidden",
         height: metrics.rowH,
         marginBottom: metrics.rowGap,
-        paddingLeft: metrics.padX,
         paddingRight: metrics.padX,
-        backgroundColor: rowBg,
+        backgroundImage: metallicGradient(baseHue),
         borderRadius: radius,
+        borderWidth,
+        borderStyle: "solid",
+        borderColor: "#FFFFFF",
         // The fill itself now separates rows (via the marginBottom gap
         // above) — a straight rule line across a rounded rectangle would cut
         // across the curved corners, so it's dropped in favor of the gap.
       }}
     >
+      {/* Legibility fade for the value text sitting on a bright metallic
+          fill — transparent through the left/center of the row, darkening
+          toward the right edge where the number sits. zIndex keeps it
+          behind the logo/name/value content instead of painting over it. */}
       <div
         style={{
           display: "flex",
-          width: metrics.rankW,
-          fontSize: metrics.rank,
-          fontFamily: t.font.mono,
-          color: rankColor,
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundImage:
+            "linear-gradient(to right, transparent 0%, transparent 50%, rgba(0,0,0,0.55) 100%)",
+          zIndex: 0,
         }}
-      >
-        {String(rank).padStart(2, "0")}
-      </div>
+      />
       <div
         style={{
           display: "flex",
-          width: metrics.logoSize,
-          height: metrics.logoSize,
-          borderRadius: metrics.logoSize / 2,
+          position: "relative",
+          flexShrink: 0,
+          width: logoSize,
+          height: logoSize,
           marginRight: metrics.logoGap,
-          backgroundColor: t.color.rule,
+          backgroundImage: metallicGradient(baseHue),
           overflow: "hidden",
+          clipPath: `polygon(0px 0px, ${logoSize}px 0px, ${logoSize - slash}px ${logoSize}px, 0px ${logoSize}px)`,
+          zIndex: 1,
         }}
       >
         {logoDataUri ? (
           <img
             src={logoDataUri}
-            width={metrics.logoSize}
-            height={metrics.logoSize}
-            style={{ width: metrics.logoSize, height: metrics.logoSize, objectFit: "cover" }}
+            width={logoSize}
+            height={logoSize}
+            style={{ width: logoSize, height: logoSize, objectFit: "cover" }}
           />
         ) : null}
+        {/* Legibility fade for the rank number — black at the bottom edge of
+            the logo panel, fading up to transparent by a third of the way
+            into the image, so the number stays readable over light logos. */}
+        <div
+          style={{
+            display: "flex",
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundImage:
+              "linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 45%)",
+            zIndex: 1,
+          }}
+        />
+        <div
+          style={{
+            display: "flex",
+            position: "absolute",
+            left: numberInset,
+            bottom: numberInset,
+            fontSize: numberSize,
+            fontFamily: t.font.display,
+            fontWeight: 700,
+            color: "#FFFFFF",
+            textShadow: "0 2px 6px rgba(0,0,0,0.55)",
+            zIndex: 2,
+          }}
+        >
+          {String(rank).padStart(2, "0")}
+        </div>
       </div>
       <div
         style={{
@@ -514,7 +405,9 @@ function Row({
           marginRight: metrics.nameGap,
           fontSize: metrics.name,
           color: nameColor,
-          fontWeight: isLeader ? 700 : 400,
+          fontWeight: 700,
+          position: "relative",
+          zIndex: 1,
         }}
       >
         {displayName(row.name)}
@@ -522,9 +415,16 @@ function Row({
       <div
         style={{
           display: "flex",
+          flexShrink: 0, // name already yields via minWidth:0 + ellipsis above;
+          // pinning this to its content width is what stops a long name from
+          // squeezing the number itself off the row.
+          whiteSpace: "nowrap",
           fontSize: metrics.value,
           fontFamily: t.font.mono,
+          fontWeight: 700,
           color: valueColor,
+          position: "relative",
+          zIndex: 1,
         }}
       >
         {formatValue(row.value, metric)}
@@ -534,13 +434,13 @@ function Row({
 }
 
 function footerLine(list: RankedList): string {
-  const { spec, rows } = list;
+  const { spec } = list;
   const range = spec.dateRange
     ? `${spec.dateRange.start} to ${spec.dateRange.end}`
     : `as of ${list.queriedAt.slice(0, 10)}`;
   // No "socialpruf" text prefix — the wordmark image sitting right next to
   // this line already carries that.
-  return `${spec.platforms.join("+")} · ${range} · n=${rows.length}`;
+  return `${spec.platforms.join("+")} · ${range}`;
 }
 
 function Card({
@@ -613,13 +513,13 @@ function Card({
             const mid = Math.ceil(rows.length / 2);
             const left = rows.slice(0, mid);
             const right = rows.slice(mid);
-            // Each column scales off its own row count, not a shared `mid`.
-            // An odd total leaves the right column one row short — sizing it
-            // separately means its rows stretch taller to still reach the
-            // same bottom edge as the left column, instead of matching the
-            // left column's row size and stopping early with a gap beneath.
-            const leftMetrics = computeRowMetrics(left.length, true);
-            const rightMetrics = computeRowMetrics(right.length, true);
+            // Both columns share one metrics object sized off `mid`, the
+            // larger column's count (matches computeRowMetrics's own
+            // "visualRows" contract above). An odd total leaves the right
+            // column one row short — it keeps the left column's row size and
+            // stops early with a gap beneath, rather than stretching its
+            // rows taller to fake an equal row count.
+            const metrics = computeRowMetrics(mid, true);
             // Explicit width per column, not flexGrow — flexGrow alone (even
             // with flexBasis: 0) produced overlapping, unusable columns here;
             // computing the split by hand is what the single-column title
@@ -642,7 +542,7 @@ function Card({
                       row={r}
                       rank={i + 1}
                       metric={spec.metric}
-                      metrics={leftMetrics}
+                      metrics={metrics}
                       logoDataUri={visuals.get(r.entityId)?.dataUri ?? null}
                       accentColor={visuals.get(r.entityId)?.accent ?? null}
                     />
@@ -655,7 +555,7 @@ function Card({
                       row={r}
                       rank={left.length + i + 1}
                       metric={spec.metric}
-                      metrics={rightMetrics}
+                      metrics={metrics}
                       logoDataUri={visuals.get(r.entityId)?.dataUri ?? null}
                       accentColor={visuals.get(r.entityId)?.accent ?? null}
                     />

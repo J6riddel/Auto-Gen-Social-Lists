@@ -15,6 +15,7 @@
  */
 
 import { keyFor } from "./keyring.js";
+import { canonicalTeamKey } from "../teamNames.js";
 
 const BASE = process.env.SP_API_BASE ?? "https://socialpruf.com";
 
@@ -87,6 +88,9 @@ export interface AccountRecord {
   displayName: string | null;
   lastSyncedAt: string | null; // ISO datetime, null if never synced
   platformAccountUrl: string | null;
+  // Undocumented in the generic socialAccounts example but confirmed present
+  // on every real row — see fetchInstagramLogosByName, which depends on it.
+  cdnProfileImageUrl: string | null;
 }
 
 /** All tracked social accounts for the org's team. Identity/metadata only —
@@ -121,9 +125,16 @@ interface StatsByEntityResponse {
  *  grouped row's name — the two aren't guaranteed identical casing/decoration
  *  (confirmed: the league's own account showed up as "nhl"/"NHL"/"@nhl"
  *  across platforms), so this is intentionally forgiving. Only used for the
- *  logo fallback below, never for anything numeric. */
+ *  logo fallback below, never for anything numeric.
+ *
+ *  Routed through canonicalTeamKey rather than a plain lowercase/trim,
+ *  because casing isn't the only thing that drifts between the two queries —
+ *  confirmed on nfl-league: the brand-grouped call named an entity "Browns"
+ *  while the account-grouped Instagram call named the same entity "Cleveland
+ *  Browns" (and the reverse full/short mismatch for other teams), which a
+ *  plain lowercase compare doesn't reconcile. */
 export function normalizeBrandName(name: string): string {
-  return name.trim().toLowerCase().replace(/^@/, "");
+  return canonicalTeamKey(name);
 }
 
 /** Instagram avatars keyed by normalized name — a fallback logo source.
@@ -131,29 +142,25 @@ export function normalizeBrandName(name: string): string {
  *  Socialpruf has cached for the brand, which empirically isn't necessarily
  *  Instagram's own even when the query was scoped to platform=instagram
  *  (confirmed: a real instagram-only followers run still returned a TikTok —
- *  WebP, unrenderable by Satori — image for several teams). Querying
- *  groupBy=account scoped to platform=instagram instead returns each
- *  account's own image, guaranteed Instagram-sourced. There's no shared
- *  brand id at the account level to join on, so this matches by name — good
- *  enough for team names in practice, even though name-matching is exactly
- *  what groupBy=brand exists to avoid for numeric stats. */
+ *  WebP, unrenderable by Satori — image for several teams).
+ *
+ *  Built from listAccounts, not statsByEntity's groupBy=account — that
+ *  endpoint's `name` field turned out to be the raw platform *username*, not
+ *  a display name (confirmed on nba-league: the Grizzlies' row there was
+ *  "memgrizz", not "Memphis Grizzlies"). Joining on that only ever worked by
+ *  coincidence, for whichever teams' handles happen to equal their own
+ *  mascot name — real accounts fetched here expose `displayName` instead
+ *  ("Memphis Grizzlies"), which is what actually lines up with the
+ *  brand-grouped name on the other side of this join. There's no shared
+ *  brand id at the account level to join on, so this still matches by name —
+ *  good enough for team names in practice, even though name-matching is
+ *  exactly what groupBy=brand exists to avoid for numeric stats. */
 export async function fetchInstagramLogosByName(orgSlug: string): Promise<Map<string, string>> {
-  const teamIds = await teamIdsFor(orgSlug);
-  const perTeam = await Promise.all(
-    teamIds.map((teamId) =>
-      request<StatsByEntityResponse>({
-        orgSlug,
-        teamId,
-        path: "/developer/v1/statsByEntity",
-        query: { groupBy: "account", platform: "instagram" },
-      }),
-    ),
-  );
+  const accounts = await listAccounts(orgSlug);
   const map = new Map<string, string>();
-  for (const { data } of perTeam) {
-    for (const row of data) {
-      if (row.cdnProfileImageUrl) map.set(normalizeBrandName(row.name), row.cdnProfileImageUrl);
-    }
+  for (const a of accounts) {
+    if (a.platform !== "instagram" || !a.cdnProfileImageUrl) continue;
+    map.set(normalizeBrandName(a.displayName ?? a.username), a.cdnProfileImageUrl);
   }
   return map;
 }

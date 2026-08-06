@@ -62,6 +62,15 @@ export interface AwarenessPacket {
 /** ---- Judgment output ---- */
 
 export const ListSpecSchema = z.object({
+  reasoning: z
+    .string()
+    .max(500)
+    .describe(
+      "Brief, plain-text deliberation written before the fields below: what the " +
+        "packet supports, why this org/angle over the alternatives, any coverage " +
+        "or platform-count tradeoff considered. Kept in the receipt for audit, " +
+        "never shown on the card.",
+    ),
   title: z.string().min(4).max(70),
   orgSlug: z.string(),
   platforms: z
@@ -88,7 +97,14 @@ export const ListSpecSchema = z.object({
     .object({ start: z.string(), end: z.string() })
     .nullable()
     .describe("null for point-in-time metrics like followers"),
-  topN: z.number().int().min(3).max(25),
+  topN: z
+    .number()
+    .int()
+    .min(4)
+    .max(24)
+    .refine((n) => n % 2 === 0, {
+      message: "topN must be even — an odd count above the two-column threshold leaves a gap under the short column",
+    }),
   sortDir: z.enum(["desc", "asc"]),
   angle: z.string().max(280).describe("Why this list is worth posting"),
   caveat: z
