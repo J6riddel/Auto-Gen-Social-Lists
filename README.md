@@ -1,7 +1,7 @@
 # socialpruf-list-bot
 
 Picks a ranked list from Socialpruf data each day, renders it as a card, and
-stages it for X. The list is chosen by a model against a written editorial
+stages it for Social. The list is chosen by a model against a written editorial
 standard; the numbers on the card are whatever the API returned.
 
 ## Run it

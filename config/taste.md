@@ -30,8 +30,7 @@ in the replies costs more than a ranking that never shipped.
 
 - Never invent, round for effect, or estimate a value. The card shows what the
   API returned.
-- Never mix platforms inside one ranking. One platform per list.
-- Never rank by engagement rate. Use EMV or a raw count.
+- Never have different mixes of platforms inside one ranking. One platform per list or the same mix of 3-4. (For expample: No instagram and tiktok vs tiktok and X), prioratize amix that is editorially strong or has the most pure data.
 - If a metric is modelled rather than observed (EMV), say so on the card.
 - If coverage is partial, either say "of the N we track" in the title or pick a
   different list.
@@ -40,7 +39,7 @@ in the replies costs more than a ranking that never shipped.
 
 Plain, declarative, a little dry. State the finding, then the one detail that
 makes it interesting. No "🚨", no "Let that sink in", no rhetorical questions.
-Assume the reader knows the sport. Never explain what EMV is in the post — link
+Assume the reader knows the sport. Never explain what EMV is in the post, link
 it if you must.
 
 Two sentences is usually right. Three is the ceiling.
