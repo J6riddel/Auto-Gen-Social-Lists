@@ -8,7 +8,8 @@
       "expectedEntityCount": 132,
       "notes": "132 tracked social accounts = 33 entities (32 clubs + the league account) x 4 platforms (instagram, tiktok, twitter, youtube). One account per platform per entity, not one row per team — confirmed via pnpm probe on 2026-08-06.",
       "ownAccountName": "NHL",
-      "excludeEntityNames": []
+      "excludeEntityNames": [],
+      "espnLeaguePath": "hockey/nhl"
     },
     {
       "slug": "nfl-league",
@@ -18,7 +19,8 @@
       "expectedEntityCount": 99,
       "notes": "Unlike the other leagues, this key isn't attached to one team workspace — it's split across one workspace per division (NFC North, AFC East, NFC West, NFC East, AFC West, AFC North), 6 of 8 total. AFC South's workspace exists but is empty (0 accounts); NFC South has no workspace at all — so 8 of 32 teams (AFC South + NFC South) aren't tracked yet. client.ts now fans out across every team workspace for an org instead of just the first, which is what surfaced this (previously only NFC North was ever queried, looking like ~4 teams total). NFC North's workspace also carries one confirmed-bad row, 'Detroit Tigers' (an MLB club, not NFL) — listed in excludeEntityNames and dropped in fetch/build.ts, not a per-list judgment call. Net: 99 tracked accounts = 24 real teams + 1 excluded bad row, x 4 platforms. Usable for lists up to topN 24; re-probe once Socialpruf backfills AFC/NFC South — confirmed via pnpm probe + manual per-workspace statsByEntity check on 2026-08-06.",
       "ownAccountName": "NFL",
-      "excludeEntityNames": ["Detroit Tigers"]
+      "excludeEntityNames": ["Detroit Tigers"],
+      "espnLeaguePath": "football/nfl"
     },
     {
       "slug": "nba-league",
@@ -28,7 +30,8 @@
       "expectedEntityCount": 125,
       "notes": "125 tracked social accounts = 31 entities (30 clubs + the league's own 'NBA' account) x 4 platforms (instagram, tiktok, twitter, youtube), plus one extra snapchat account that belongs only to the league account, not any club. Avoid selecting snapchat as a ranking platform — it isn't a consistent mix across entities. Team display names are inconsistent across platforms (e.g. 'Lakers' vs 'Los Angeles Lakers'), same as nhl-league, but groupBy=brand resolves that server-side — confirmed via pnpm probe on 2026-08-06.",
       "ownAccountName": "NBA",
-      "excludeEntityNames": []
+      "excludeEntityNames": [],
+      "espnLeaguePath": "basketball/nba"
     },
     {
       "slug": "mlb-league",
@@ -36,9 +39,10 @@
       "keyEnv": "SP_KEY_MLB_LEAGUE",
       "entityKind": "team",
       "expectedEntityCount": 124,
-      "notes": "124 tracked social accounts = 31 entities x 4 platforms (instagram, tiktok, twitter, youtube). 30 are MLB clubs; the 31st is 'Savannah Bananas' (not an MLB club — Socialpruf-side data noise). No dedicated 'MLB' league account is tracked today, so ownAccountName is currently a no-op; left set for when Socialpruf adds one. Confirmed via pnpm probe on 2026-08-06.",
+      "notes": "124 tracked social accounts = 31 entities x 4 platforms (instagram, tiktok, twitter, youtube). 30 are MLB clubs; the 31st is 'Savannah Bananas' (not an MLB club — Socialpruf-side data noise), listed in excludeEntityNames and dropped in fetch/build.ts, same pattern as nfl-league's 'Detroit Tigers'. No dedicated 'MLB' league account is tracked today, so ownAccountName is currently a no-op; left set for when Socialpruf adds one. Confirmed via pnpm probe on 2026-08-06.",
       "ownAccountName": "MLB",
-      "excludeEntityNames": []
+      "excludeEntityNames": ["Savannah Bananas"],
+      "espnLeaguePath": "baseball/mlb"
     },
     {
       "slug": "creators",
@@ -48,7 +52,8 @@
       "expectedEntityCount": 0,
       "notes": "Roster size varies. Fill expectedEntityCount after the first probe.",
       "ownAccountName": null,
-      "excludeEntityNames": []
+      "excludeEntityNames": [],
+      "espnLeaguePath": null
     }
   ],
   "metrics": [
@@ -57,21 +62,60 @@
       "label": "Followers",
       "unit": "count",
       "cadence": "daily snapshot",
-      "caveat": "Point-in-time. One platform, or the same 3-4 platform mix for every entity in the ranking — never a 2-platform mix, and never a different mix per entity."
+      "caveat": "Point-in-time. One platform, or the same 3-4 platform mix for every entity in the ranking — never a 2-platform mix, and never a different mix per entity.",
+      "apiField": "followers",
+      "pointInTime": true,
+      "allowNegative": false
     },
     {
       "id": "emv",
       "label": "EMV",
       "unit": "usd",
       "cadence": "per post, summable over a date range",
-      "caveat": "Model output, not observed spend. State the formula when posting."
+      "caveat": "Model output, not observed spend. State the formula when posting.",
+      "apiField": "emv",
+      "pointInTime": false,
+      "allowNegative": false
     },
     {
       "id": "engagement_rate",
       "label": "Engagement rate",
       "unit": "percent",
-      "cadence": "per post",
-      "caveat": "Denominator-sensitive and noisy. Prefer emv for ranking."
+      "cadence": "per post, summed over a date range",
+      "caveat": "Denominator-sensitive and noisy on a low post count or a short window — prefer emv for ranking unless the spread genuinely holds up.",
+      "apiField": "engagementRate",
+      "pointInTime": false,
+      "allowNegative": false
+    },
+    {
+      "id": "new_followers",
+      "label": "New Followers",
+      "unit": "count",
+      "cadence": "net change over a date range",
+      "caveat": "Net of gained minus lost — can be negative. That's a real finding (an account shrinking), not an error.",
+      "apiField": "newFollowers",
+      "pointInTime": false,
+      "allowNegative": true
+    },
+    {
+      "id": "likes",
+      "label": "Likes",
+      "unit": "count",
+      "cadence": "summed over a date range",
+      "caveat": "Raw volume, not rate-adjusted — favors accounts that post more often.",
+      "apiField": "likes",
+      "pointInTime": false,
+      "allowNegative": false
+    },
+    {
+      "id": "impressions",
+      "label": "Impressions",
+      "unit": "count",
+      "cadence": "summed over a date range",
+      "caveat": "Raw reach, not rate-adjusted — favors accounts that post more often.",
+      "apiField": "impressions",
+      "pointInTime": false,
+      "allowNegative": false
     }
   ]
 }

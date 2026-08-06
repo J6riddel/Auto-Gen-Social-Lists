@@ -165,17 +165,21 @@ export async function fetchInstagramLogosByName(orgSlug: string): Promise<Map<st
   return map;
 }
 
-export interface FollowerRow {
+export interface MetricRow {
   id: string;
   name: string;
   handle: string | null;
-  followers: number;
+  value: number;
   logoUrl: string | null;
 }
 
-/** Current follower count per entity across one or more platforms. No date
- *  range — this is a point-in-time gauge, matching the "followers" metric's
- *  semantics (config/orgs.json requires dateRange to be null for it).
+/** Any statsByEntity metric for one or more entities, keyed by the raw API
+ *  field name (config/orgs.json's metrics[].apiField) — one fetch path for
+ *  every stat Socialpruf exposes on a brand-grouped row (followers, emv,
+ *  engagementRate, newFollowers, likes, impressions, ...), so adding a new
+ *  metric to the config catalog needs no new fetch code. dateRange null means
+ *  a point-in-time read (followers' semantics); set means summed/computed
+ *  over [start, end] (everything else).
  *
  *  Grouped by brand, not account: an account is single-platform, and a
  *  brand's display name is inconsistent per platform ("nhl" on one, "NHL"
@@ -188,49 +192,12 @@ export interface FollowerRow {
  *  account), unverified for entityKind "creator" since no key is
  *  configured for that org yet. statsByEntity doesn't expose a per-entity
  *  handle, so handle is always null here. */
-export async function fetchFollowers(
+export async function fetchMetricByEntity(
   orgSlug: string,
   platforms: string[],
-): Promise<FollowerRow[]> {
-  const teamIds = await teamIdsFor(orgSlug);
-  const perTeam = await Promise.all(
-    teamIds.map((teamId) =>
-      request<StatsByEntityResponse>({
-        orgSlug,
-        teamId,
-        path: "/developer/v1/statsByEntity",
-        query: { groupBy: "brand", platform: platforms.join(",") },
-      }),
-    ),
-  );
-  const rows = perTeam.flatMap(({ data }) =>
-    data.map((row) => ({
-      id: row.id,
-      name: row.name,
-      handle: null,
-      followers: row.metrics.followers,
-      logoUrl: row.cdnProfileImageUrl,
-    })),
-  );
-  return dedupeBy(rows, (r) => r.id);
-}
-
-export interface EmvRow {
-  entityId: string;
-  name: string;
-  handle: string | null;
-  emv: number;
-  logoUrl: string | null;
-}
-
-/** EMV per entity across one or more platforms, summed over [start, end].
- *  Same groupBy=brand reasoning as fetchFollowers applies. */
-export async function fetchEmvByEntity(
-  orgSlug: string,
-  platforms: string[],
-  start: string,
-  end: string,
-): Promise<EmvRow[]> {
+  apiField: string,
+  dateRange: { start: string; end: string } | null,
+): Promise<MetricRow[]> {
   const teamIds = await teamIdsFor(orgSlug);
   const perTeam = await Promise.all(
     teamIds.map((teamId) =>
@@ -241,20 +208,20 @@ export async function fetchEmvByEntity(
         query: {
           groupBy: "brand",
           platform: platforms.join(","),
-          fromDate: start,
-          toDate: end,
+          fromDate: dateRange?.start,
+          toDate: dateRange?.end,
         },
       }),
     ),
   );
   const rows = perTeam.flatMap(({ data }) =>
     data.map((row) => ({
-      entityId: row.id,
+      id: row.id,
       name: row.name,
       handle: null,
-      emv: row.metrics.emv,
+      value: row.metrics[apiField] ?? NaN,
       logoUrl: row.cdnProfileImageUrl,
     })),
   );
-  return dedupeBy(rows, (r) => r.entityId);
+  return dedupeBy(rows, (r) => r.id);
 }

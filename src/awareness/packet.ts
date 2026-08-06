@@ -35,6 +35,8 @@ async function recentPosts(limit = 10) {
           date: receipt.generatedAt?.slice(0, 10) ?? dir.slice(0, 10),
           title: receipt.spec.title,
           orgSlug: receipt.spec.orgSlug,
+          metric: receipt.spec.metric,
+          platforms: receipt.spec.platforms,
         });
       } catch {
         // skip malformed
@@ -65,7 +67,7 @@ export async function buildPacket(): Promise<AwarenessPacket> {
         ownAccountName: o.ownAccountName,
       };
     }),
-    metrics: METRICS.filter((m) => m.id !== "engagement_rate"),
+    metrics: METRICS,
     recentPosts: await recentPosts(),
   };
 }

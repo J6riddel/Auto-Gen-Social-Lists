@@ -19,6 +19,11 @@ export interface OrgConfig {
    *  conditional on spec.excludeOwnAccount. Empty for orgs with no known bad
    *  rows. */
   excludeEntityNames: string[];
+  /** ESPN's sport/league path (e.g. "football/nfl"), used to pull that
+   *  league's live team roster and drop any fetched entity that isn't on it —
+   *  see src/fetch/leagueRoster.ts. null for orgs with no such league (e.g.
+   *  creators), which skips the check entirely. */
+  espnLeaguePath: string | null;
 }
 
 export interface MetricConfig {
@@ -27,6 +32,18 @@ export interface MetricConfig {
   unit: "count" | "usd" | "percent";
   cadence: string;
   caveat: string;
+  /** Field name inside statsByEntity's `metrics` object (e.g. "engagementRate",
+   *  "newFollowers") — lets fetch/client.ts pull any Socialpruf stat off the
+   *  same brand-grouped row without per-metric fetch code. */
+  apiField: string;
+  /** true = current-value snapshot, dateRange must be null (e.g. followers).
+   *  false = summed/computed over a window, dateRange required (e.g. emv,
+   *  engagement rate, follower growth). */
+  pointInTime: boolean;
+  /** Most metrics failing verify's non-negative check means bad data. Growth
+   *  metrics (new_followers) are the exception — a real, provable follower
+   *  loss is a negative number, not an error. */
+  allowNegative: boolean;
 }
 
 /** ---- Awareness ---- */
@@ -56,7 +73,13 @@ export interface AwarenessPacket {
     ownAccountName: string | null;
   }>;
   metrics: MetricConfig[];
-  recentPosts: Array<{ date: string; title: string; orgSlug: string }>;
+  recentPosts: Array<{
+    date: string;
+    title: string;
+    orgSlug: string;
+    metric: string;
+    platforms: string[];
+  }>;
 }
 
 /** ---- Judgment output ---- */
@@ -84,7 +107,14 @@ export const ListSpecSchema = z.object({
       "Every entity in the ranking is summed across the same platform set. " +
         "config/taste.md's hard rule: one platform, or a 3-4 mix, never 2.",
     ),
-  metric: z.enum(["followers", "emv"]),
+  metric: z
+    .string()
+    .min(1)
+    .describe(
+      "Must be one of packet.metrics[].id. Not a fixed enum — the packet's " +
+        "metrics catalog is the source of truth for what's available; the " +
+        "feasibility gate checks membership and the point-in-time/dateRange rule.",
+    ),
   excludeOwnAccount: z
     .boolean()
     .describe(

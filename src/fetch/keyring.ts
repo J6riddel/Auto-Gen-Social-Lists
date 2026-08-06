@@ -9,9 +9,10 @@
 
 import "dotenv/config";
 import orgsConfig from "../../config/orgs.json" with { type: "json" };
-import type { OrgConfig } from "../types.js";
+import type { MetricConfig, OrgConfig } from "../types.js";
 
 const ORGS = orgsConfig.orgs as OrgConfig[];
+const METRICS = orgsConfig.metrics as MetricConfig[];
 
 export function listOrgs(): OrgConfig[] {
   return ORGS;
@@ -25,6 +26,16 @@ export function getOrg(slug: string): OrgConfig {
     );
   }
   return org;
+}
+
+export function getMetric(id: string): MetricConfig {
+  const metric = METRICS.find((m) => m.id === id);
+  if (!metric) {
+    throw new Error(
+      `Unknown metric "${id}". Known: ${METRICS.map((m) => m.id).join(", ")}`,
+    );
+  }
+  return metric;
 }
 
 /** Resolve slug -> key. Throws rather than falling back, so a missing key

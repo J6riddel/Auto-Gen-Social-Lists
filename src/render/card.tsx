@@ -14,18 +14,28 @@ import satori from "satori";
 import { Resvg } from "@resvg/resvg-js";
 import Jimp from "jimp";
 import { tokens as t } from "./tokens.js";
-import type { RankedList, RankedRow } from "../types.js";
+import { getMetric } from "../fetch/keyring.js";
+import type { MetricConfig, RankedList, RankedRow } from "../types.js";
 // Mascot-only short names for the row label (Chicago Blackhawks -> Blackhawks).
 // Shared with fetch/client.ts, which uses the same table to join a
 // brand-grouped entity name to an Instagram-grouped one when the two queries
 // don't agree on full-vs-short form for the same team.
 import { displayTeamName as displayName } from "../teamNames.js";
 
-function formatValue(value: number, metric: string): string {
-  if (metric === "emv") {
+/** Driven by the metric's `unit`/`allowNegative` (config/orgs.json), not a
+ *  hardcoded metric id — a new metric added to the catalog formats correctly
+ *  here with no card.tsx change. A "+" prefix on a positive allowNegative
+ *  value (new_followers) makes clear it's a delta, not an absolute count;
+ *  negative values already print their own "-" via toLocaleString. */
+function formatValue(value: number, metric: MetricConfig): string {
+  if (metric.unit === "usd") {
     return `$${Math.round(value).toLocaleString("en-US")}`;
   }
-  return Math.round(value).toLocaleString("en-US");
+  if (metric.unit === "percent") {
+    return `${value.toFixed(1)}%`;
+  }
+  const sign = metric.allowNegative && value > 0 ? "+" : "";
+  return `${sign}${Math.round(value).toLocaleString("en-US")}`;
 }
 
 // Confirmed against real data: Socialpruf re-hosts logos in whatever format
@@ -121,20 +131,33 @@ function metallicGradient(hex: string): string {
   );
 }
 
-/** Picks the most saturated pixel in a downscaled logo as "the" brand color
- *  — a cheap stand-in for real palette extraction that works well for sports
- *  logos (usually one or two vivid colors on a plain/transparent field).
- *  Near-white/near-black/gray/transparent pixels are skipped since they're
- *  almost always background, not the mark itself. Returns null (not a
- *  guess) when nothing qualifies, e.g. a monochrome logo — Row falls back
- *  to the default palette in that case, same as a missing logo. */
+// Circular hue buckets, 30 degrees wide, centered on 0/30/60/... — the
+// (h + half-width) % 360 shift is what makes red (which straddles the 0/360
+// seam) land in one bucket instead of splitting across two.
+const HUE_BUCKET_SIZE = 30;
+const HUE_BUCKET_COUNT = 360 / HUE_BUCKET_SIZE;
+
+/** Finds "the" brand color by picking the most-populated hue cluster in a
+ *  downscaled logo, not a single outlier pixel — a cheap stand-in for real
+ *  palette extraction that works well for sports logos (usually one or two
+ *  vivid colors on a plain/transparent field). Near-white/near-black/gray/
+ *  transparent pixels are skipped since they're almost always background,
+ *  not the mark itself. Averaging within the winning bucket, rather than
+ *  taking a single max-saturation pixel, matters in practice: flat-color
+ *  logos are full of pixels tied at saturation 1.0 (e.g. a navy cap brim and
+ *  a red sock are equally saturated), and picking the first one encountered
+ *  in raster order picked the wrong team color on real logos — confirmed on
+ *  the Red Sox and Braves crests, both of which extracted as navy blue
+ *  despite red covering more than half the mark. Returns null (not a guess)
+ *  when nothing qualifies, e.g. a monochrome logo — Row falls back to the
+ *  default palette in that case, same as a missing logo. */
 async function extractAccentColor(buf: Buffer): Promise<string | null> {
   try {
     const img = await Jimp.read(buf);
     img.resize(32, 32);
     const { data } = img.bitmap;
 
-    let best: { r: number; g: number; b: number; sat: number } | null = null;
+    const buckets = new Map<number, { r: number; g: number; b: number; n: number }>();
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i]!;
       const g = data[i + 1]!;
@@ -148,10 +171,25 @@ async function extractAccentColor(buf: Buffer): Promise<string | null> {
       const sat = max === min ? 0 : (max - min) / (255 - Math.abs(max + min - 255));
       if (lightness > 0.92 || lightness < 0.08 || sat < 0.25) continue;
 
-      if (!best || sat > best.sat) best = { r, g, b, sat };
+      const [h] = rgbToHsl(r, g, b);
+      const bucket = Math.floor(((h + HUE_BUCKET_SIZE / 2) % 360) / HUE_BUCKET_SIZE) % HUE_BUCKET_COUNT;
+      const entry = buckets.get(bucket) ?? { r: 0, g: 0, b: 0, n: 0 };
+      entry.r += r;
+      entry.g += g;
+      entry.b += b;
+      entry.n += 1;
+      buckets.set(bucket, entry);
     }
 
-    return best ? toLegibleHex(best.r, best.g, best.b) : null;
+    let winner: { r: number; g: number; b: number; n: number } | null = null;
+    for (const entry of buckets.values()) if (!winner || entry.n > winner.n) winner = entry;
+    if (!winner) return null;
+
+    return toLegibleHex(
+      Math.round(winner.r / winner.n),
+      Math.round(winner.g / winner.n),
+      Math.round(winner.b / winner.n),
+    );
   } catch {
     return null;
   }
@@ -271,7 +309,7 @@ function Row({
 }: {
   row: RankedRow;
   rank: number;
-  metric: string;
+  metric: MetricConfig;
   metrics: RowMetrics;
   logoDataUri: string | null;
   accentColor: string | null;
@@ -453,6 +491,7 @@ function Card({
   brandLogo: string;
 }) {
   const { spec, rows } = list;
+  const metric = getMetric(spec.metric);
   // Explicit width, not just flexGrow — Satori sizes a flex item to its
   // content first and only grows from there, so without a hard width a long
   // title can push past the canvas edge instead of wrapping inside it.
@@ -507,7 +546,7 @@ function Card({
         ) : null}
       </div>
 
-      {rows.length > t.layout.twoColumnThreshold ? (
+      {rows.length >= t.layout.twoColumnThreshold ? (
         <div style={{ display: "flex", flexDirection: "row" }}>
           {(() => {
             const mid = Math.ceil(rows.length / 2);
@@ -541,7 +580,7 @@ function Card({
                       key={r.entityId}
                       row={r}
                       rank={i + 1}
-                      metric={spec.metric}
+                      metric={metric}
                       metrics={metrics}
                       logoDataUri={visuals.get(r.entityId)?.dataUri ?? null}
                       accentColor={visuals.get(r.entityId)?.accent ?? null}
@@ -554,7 +593,7 @@ function Card({
                       key={r.entityId}
                       row={r}
                       rank={left.length + i + 1}
-                      metric={spec.metric}
+                      metric={metric}
                       metrics={metrics}
                       logoDataUri={visuals.get(r.entityId)?.dataUri ?? null}
                       accentColor={visuals.get(r.entityId)?.accent ?? null}
@@ -574,7 +613,7 @@ function Card({
                 key={r.entityId}
                 row={r}
                 rank={i + 1}
-                metric={spec.metric}
+                metric={metric}
                 metrics={metrics}
                 logoDataUri={visuals.get(r.entityId)?.dataUri ?? null}
                 accentColor={visuals.get(r.entityId)?.accent ?? null}

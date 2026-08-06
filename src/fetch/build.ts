@@ -3,8 +3,9 @@
  * list is; this decides nothing and just goes and gets it.
  */
 
-import { fetchEmvByEntity, fetchFollowers, fetchInstagramLogosByName, normalizeBrandName } from "./client.js";
-import { getOrg } from "./keyring.js";
+import { fetchInstagramLogosByName, fetchMetricByEntity, normalizeBrandName } from "./client.js";
+import { getMetric, getOrg } from "./keyring.js";
+import { filterToLeagueRoster } from "./leagueRoster.js";
 import type { ListSpec, RankedList, RankedRow } from "../types.js";
 
 /** Drops the org's own umbrella account when judgment decided it isn't a
@@ -31,51 +32,37 @@ function applyBadDataExclusion(rows: RankedRow[], spec: ListSpec): RankedRow[] {
 }
 
 export async function buildList(spec: ListSpec): Promise<RankedList> {
-  let rows: RankedRow[];
-  let rawQuery: Record<string, unknown>;
+  const metric = getMetric(spec.metric);
 
-  if (spec.metric === "followers") {
-    const [accounts, instagramLogos] = await Promise.all([
-      fetchFollowers(spec.orgSlug, spec.platforms),
-      fetchInstagramLogosByName(spec.orgSlug),
-    ]);
-    rows = accounts.map((a) => ({
-      entityId: a.id,
-      name: a.name,
-      handle: a.handle,
-      value: a.followers,
-      logoUrl: a.logoUrl,
-      logoUrlFallback: instagramLogos.get(normalizeBrandName(a.name)) ?? null,
-    }));
-    rawQuery = { route: "followers", org: spec.orgSlug, platforms: spec.platforms };
-  } else {
-    const { start, end } = spec.dateRange!;
-    const [emv, instagramLogos] = await Promise.all([
-      fetchEmvByEntity(spec.orgSlug, spec.platforms, start, end),
-      fetchInstagramLogosByName(spec.orgSlug),
-    ]);
-    rows = emv.map((r) => ({
-      entityId: r.entityId,
-      name: r.name,
-      handle: r.handle,
-      value: r.emv,
-      logoUrl: r.logoUrl,
-      logoUrlFallback: instagramLogos.get(normalizeBrandName(r.name)) ?? null,
-    }));
-    rawQuery = {
-      route: "stats/by-entity",
-      org: spec.orgSlug,
-      platforms: spec.platforms,
-      metric: "emv",
-      start,
-      end,
-    };
-  }
+  const [metricRows, instagramLogos] = await Promise.all([
+    fetchMetricByEntity(spec.orgSlug, spec.platforms, metric.apiField, spec.dateRange),
+    fetchInstagramLogosByName(spec.orgSlug),
+  ]);
+  let rows: RankedRow[] = metricRows.map((r) => ({
+    entityId: r.id,
+    name: r.name,
+    handle: r.handle,
+    value: r.value,
+    logoUrl: r.logoUrl,
+    logoUrlFallback: instagramLogos.get(normalizeBrandName(r.name)) ?? null,
+  }));
+  const rawQuery: Record<string, unknown> = {
+    route: "statsByEntity",
+    org: spec.orgSlug,
+    platforms: spec.platforms,
+    metric: spec.metric,
+    ...(spec.dateRange ? { start: spec.dateRange.start, end: spec.dateRange.end } : {}),
+  };
 
-  const beforeExclusion = rows.length;
   rows = applyBadDataExclusion(rows, spec);
+
+  const rosterCheck = await filterToLeagueRoster(rows, spec);
+  rows = rosterCheck.rows;
+  if (rosterCheck.dropped.length > 0) rawQuery.leagueRosterExcluded = rosterCheck.dropped;
+
+  const beforeOwnAccountExclusion = rows.length;
   rows = applyOwnAccountExclusion(rows, spec);
-  rawQuery.ownAccountExcluded = spec.excludeOwnAccount && rows.length < beforeExclusion;
+  rawQuery.ownAccountExcluded = spec.excludeOwnAccount && rows.length < beforeOwnAccountExclusion;
 
   rows.sort((a, b) => (spec.sortDir === "desc" ? b.value - a.value : a.value - b.value));
 

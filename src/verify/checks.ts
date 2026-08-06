@@ -6,6 +6,7 @@
  * produces a wrong ranking is not, because the correction lives on X forever.
  */
 
+import { getMetric } from "../fetch/keyring.js";
 import type { RankedList } from "../types.js";
 
 export interface VerifyResult {
@@ -21,6 +22,7 @@ export function verify(list: RankedList): VerifyResult {
   const failures: string[] = [];
   const warnings: string[] = [];
   const { rows, spec } = list;
+  const metric = getMetric(spec.metric);
 
   if (rows.length !== spec.topN) {
     failures.push(`expected ${spec.topN} rows, got ${rows.length}`);
@@ -30,7 +32,12 @@ export function verify(list: RankedList): VerifyResult {
     if (r.value === null || r.value === undefined || Number.isNaN(r.value)) {
       failures.push(`row ${i + 1} (${r.name}) has no value`);
     }
-    if (r.value < 0) failures.push(`row ${i + 1} (${r.name}) is negative`);
+    // Most metrics failing this means bad data. Growth metrics (new_followers)
+    // are the documented exception — a real follower loss is negative, not
+    // an error (see config/orgs.json's allowNegative on that metric).
+    if (r.value < 0 && !metric.allowNegative) {
+      failures.push(`row ${i + 1} (${r.name}) is negative`);
+    }
     if (!r.name?.trim()) failures.push(`row ${i + 1} has no name`);
   }
 

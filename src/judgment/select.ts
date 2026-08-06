@@ -23,6 +23,11 @@ You will be given an awareness packet describing exactly what data exists right
 now. You may only propose a list that the packet supports. If the packet says an
 org tracks 22 of 32 teams, you cannot propose a list of all 32.
 
+The packet's recentPosts lists the last several lists actually posted, each with
+its org, metric, and platform mix. Cross-reference it before proposing — a repeat
+of the same metric/platform combo (even for a different org) is exactly the kind
+of staleness the editorial standard below asks you to avoid.
+
 Editorial standard you are being judged against:
 
 ${taste}
@@ -42,7 +47,9 @@ don't decide the list first and rationalize it after. Shape:
                                // Every entity is ranked on the sum across this
                                // exact set, so it must mean the same thing for
                                // every entity in the list.
-  "metric": "followers" | "emv",
+  "metric": string,           // one of packet.metrics[].id — not fixed to
+                               // followers/emv, use whichever metric in the
+                               // packet makes the most interesting list
   "excludeOwnAccount": boolean, // see below
   "dateRange": { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" } | null,
   "topN": number,             // even, 4-24 (odd counts split into uneven card columns)
@@ -51,9 +58,14 @@ don't decide the list first and rationalize it after. Shape:
   "caveat": string | null     // shown on the card footer, under 120 chars
 }
 
-dateRange must be null when metric is "followers" (it is a point-in-time
-snapshot) and must be set when metric is "emv". Never end a date range later
-than the org's freshestDataDate.
+Each entry in packet.metrics has a pointInTime flag: true means the metric is
+a current-value snapshot and dateRange must be null (e.g. followers); false
+means it's summed/computed over a window and dateRange must be set (e.g. emv,
+engagement rate, follower growth). Never end a date range later than the org's
+freshestDataDate. A metric's unit and caveat are also in packet.metrics —
+read them; a percent-unit metric is not a count, and a metric whose caveat
+warns it's noisy or can be negative (e.g. new followers, which nets gains
+against losses) needs framing on the card, not avoidance by default.
 
 Some orgs track an umbrella account alongside their individual entities — the
 packet's ownAccountName field on that org, if not null (e.g. a league's own

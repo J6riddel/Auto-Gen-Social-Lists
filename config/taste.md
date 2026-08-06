@@ -17,10 +17,20 @@ in the replies costs more than a ranking that never shipped.
   middle of the table is surprising.
 - The metric genuinely measures the thing the title claims.
 - The gaps between ranks are large enough that the ordering means something.
+- The metric itself is the find. Followers is a leaderboard everyone already
+  half-knows; who's growing fastest, who's losing followers, whose engagement
+  rate doesn't match their follower count, who racked up the most likes this
+  month — these are claims nobody could guess without the data. Reach for
+  packet.metrics beyond followers/emv before defaulting to them.
 
 ## A list is not worth posting when
 
 - The top of the list is the same as last time we posted about this org.
+- The metric and platform mix is the same shape as recent posts, just with the
+  org swapped. "Followers, one platform" on repeat looks automated even when
+  each individual list is defensible — check recentPosts and vary the metric
+  (emv, not just followers) or the platform count (a 3-4 mix, not just single-
+  platform) before defaulting to what's easiest to compute.
 - The interesting claim requires a metric we did not actually pull.
 - It ranks entities that are not comparable (different platforms, different
   posting volume, wildly different account ages) without saying so.
@@ -36,13 +46,21 @@ in the replies costs more than a ranking that never shipped.
   itself (how big is the league's own following, how has it grown), include
   it — that's a different, legitimate list. Decide per list; don't default
   blindly either way.
+- A metric that can come out negative (new_followers nets gains against
+  losses) isn't broken data when it does — a real net loss for one or more
+  entities in the window is often the most screenshotable finding in the
+  list, not a reason to discard the metric or the run. Frame it plainly
+  ("X teams lost followers this month") rather than avoiding the metric to
+  dodge a negative number.
 
 ## Hard rules
 
 - Never invent, round for effect, or estimate a value. The card shows what the
   API returned.
 - Never have different mixes of platforms inside one ranking. One platform per list or the same mix of 3-4. (For expample: No instagram and tiktok vs tiktok and X), prioratize amix that is editorially strong or has the most pure data.
-- If a metric is modelled rather than observed (EMV), say so on the card.
+- If a metric is modelled rather than observed (EMV), or its packet.metrics
+  caveat flags it as noisy/denominator-sensitive (engagement rate) or capable
+  of going negative (new followers), say so on the card via `caveat`.
 - If coverage is partial, either say "of the N we track" in the title or pick a
   different list.
 

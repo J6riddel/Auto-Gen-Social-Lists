@@ -55,8 +55,8 @@ export const tokens = {
     footer: 20,
   },
 
-  // Above this many rows, the list splits into two narrower columns instead
-  // of clipping or shrinking to fit — every requested row (topN maxes at 24,
+  // At or above this many rows, the list splits into two narrower columns
+  // instead of clipping or shrinking to fit — every requested row (topN maxes at 24,
   // always even so both columns land on the same count) has to actually
   // appear on the card. Sized against this file's own dimensions: ~926px of
   // row-list height at 1080x1350 fits ~11-12 rows at `space`'s sizing, so the

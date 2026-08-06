@@ -34,13 +34,21 @@ export function checkFeasible(
     };
   }
 
-  if (spec.metric === "followers" && spec.dateRange !== null) {
-    return { ok: false, reason: "followers is point-in-time; dateRange must be null" };
+  const metric = packet.metrics.find((m) => m.id === spec.metric);
+  if (!metric) {
+    return {
+      ok: false,
+      reason: `metric "${spec.metric}" is not available (packet.metrics: ${packet.metrics.map((m) => m.id).join(", ")})`,
+    };
   }
 
-  if (spec.metric === "emv") {
+  if (metric.pointInTime && spec.dateRange !== null) {
+    return { ok: false, reason: `${metric.id} is point-in-time; dateRange must be null` };
+  }
+
+  if (!metric.pointInTime) {
     if (!spec.dateRange) {
-      return { ok: false, reason: "emv requires a dateRange" };
+      return { ok: false, reason: `${metric.id} requires a dateRange` };
     }
     if (org.freshestDataDate && spec.dateRange.end > org.freshestDataDate) {
       return {

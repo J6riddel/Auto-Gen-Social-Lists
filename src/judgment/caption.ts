@@ -8,6 +8,7 @@
 
 import { readFile } from "node:fs/promises";
 import Anthropic from "@anthropic-ai/sdk";
+import { getMetric } from "../fetch/keyring.js";
 import type { RankedList } from "../types.js";
 
 const MODEL = process.env.SP_CAPTION_MODEL ?? "claude-haiku-4-5-20251001";
@@ -16,6 +17,7 @@ const client = new Anthropic({ apiKey: process.env.SP_ANTHROPIC_KEY });
 
 export async function writeCaption(list: RankedList): Promise<string> {
   const taste = await readFile("config/taste.md", "utf8");
+  const metric = getMetric(list.spec.metric);
 
   const res = await client.messages.create({
     model: MODEL,
@@ -36,7 +38,7 @@ Return only the post text. No hashtags, no emoji, no quotation marks around it.`
         content: JSON.stringify({
           title: list.spec.title,
           angle: list.spec.angle,
-          metric: list.spec.metric,
+          metric: { id: metric.id, label: metric.label, unit: metric.unit, caveat: metric.caveat },
           caveat: list.spec.caveat,
           rows: list.rows,
         }),
