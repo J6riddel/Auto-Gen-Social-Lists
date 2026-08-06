@@ -1,10 +1,17 @@
 /**
  * Socialpruf REST client.
  *
- * Every data endpoint needs x-api-key AND x-team-id. The team id isn't a
- * secret, but there's no way to get it without a call, so it's resolved once
- * from GET /developer/v1/teams and cached for the life of the process — one
- * key is assumed to belong to one team.
+ * Every data endpoint needs x-api-key AND x-team-id. Team ids aren't secret,
+ * but there's no way to get them without a call, so GET /developer/v1/teams
+ * is resolved once and cached for the life of the process.
+ *
+ * A key can be attached to more than one team workspace — confirmed for
+ * nfl-league, whose key is split across one workspace per division (NFC
+ * North, AFC East, ...) rather than one workspace for the whole league. Using
+ * only the first team silently returned one division and called it the
+ * league. Every read below fans out across all of an org's team workspaces
+ * and merges the result, so a single-workspace org (nhl-league, nba-league,
+ * mlb-league) just does one request same as before.
  */
 
 import { keyFor } from "./keyring.js";
@@ -48,20 +55,29 @@ interface Team {
   organizationId: string;
 }
 
-const teamIdCache = new Map<string, string>();
+const teamIdsCache = new Map<string, string[]>();
 
-async function teamIdFor(orgSlug: string): Promise<string> {
-  const cached = teamIdCache.get(orgSlug);
+async function teamIdsFor(orgSlug: string): Promise<string[]> {
+  const cached = teamIdsCache.get(orgSlug);
   if (cached) return cached;
 
   const teams = await request<Team[]>({ orgSlug, path: "/developer/v1/teams" });
-  const team = teams[0];
-  if (!team) {
+  if (teams.length === 0) {
     throw new Error(`Org "${orgSlug}"'s API key isn't attached to any team`);
   }
 
-  teamIdCache.set(orgSlug, team.id);
-  return team.id;
+  const ids = teams.map((t) => t.id);
+  teamIdsCache.set(orgSlug, ids);
+  return ids;
+}
+
+/** Dedupes rows carried by more than one team workspace. Workspaces are
+ *  expected to partition entities (one division per workspace), not overlap,
+ *  but this makes overlap safe instead of double-counting a row's value. */
+function dedupeBy<T, K>(rows: T[], keyFn: (row: T) => K): T[] {
+  const seen = new Map<K, T>();
+  for (const row of rows) if (!seen.has(keyFn(row))) seen.set(keyFn(row), row);
+  return [...seen.values()];
 }
 
 export interface AccountRecord {
@@ -76,12 +92,13 @@ export interface AccountRecord {
 /** All tracked social accounts for the org's team. Identity/metadata only —
  *  follower counts live on statsByEntity, not here. */
 export async function listAccounts(orgSlug: string): Promise<AccountRecord[]> {
-  const teamId = await teamIdFor(orgSlug);
-  return request<AccountRecord[]>({
-    orgSlug,
-    teamId,
-    path: "/developer/v1/socialAccounts",
-  });
+  const teamIds = await teamIdsFor(orgSlug);
+  const perTeam = await Promise.all(
+    teamIds.map((teamId) =>
+      request<AccountRecord[]>({ orgSlug, teamId, path: "/developer/v1/socialAccounts" }),
+    ),
+  );
+  return dedupeBy(perTeam.flat(), (a) => a.id);
 }
 
 interface StatsByEntityRow {
@@ -121,16 +138,22 @@ export function normalizeBrandName(name: string): string {
  *  enough for team names in practice, even though name-matching is exactly
  *  what groupBy=brand exists to avoid for numeric stats. */
 export async function fetchInstagramLogosByName(orgSlug: string): Promise<Map<string, string>> {
-  const teamId = await teamIdFor(orgSlug);
-  const { data } = await request<StatsByEntityResponse>({
-    orgSlug,
-    teamId,
-    path: "/developer/v1/statsByEntity",
-    query: { groupBy: "account", platform: "instagram" },
-  });
+  const teamIds = await teamIdsFor(orgSlug);
+  const perTeam = await Promise.all(
+    teamIds.map((teamId) =>
+      request<StatsByEntityResponse>({
+        orgSlug,
+        teamId,
+        path: "/developer/v1/statsByEntity",
+        query: { groupBy: "account", platform: "instagram" },
+      }),
+    ),
+  );
   const map = new Map<string, string>();
-  for (const row of data) {
-    if (row.cdnProfileImageUrl) map.set(normalizeBrandName(row.name), row.cdnProfileImageUrl);
+  for (const { data } of perTeam) {
+    for (const row of data) {
+      if (row.cdnProfileImageUrl) map.set(normalizeBrandName(row.name), row.cdnProfileImageUrl);
+    }
   }
   return map;
 }
@@ -162,20 +185,27 @@ export async function fetchFollowers(
   orgSlug: string,
   platforms: string[],
 ): Promise<FollowerRow[]> {
-  const teamId = await teamIdFor(orgSlug);
-  const { data } = await request<StatsByEntityResponse>({
-    orgSlug,
-    teamId,
-    path: "/developer/v1/statsByEntity",
-    query: { groupBy: "brand", platform: platforms.join(",") },
-  });
-  return data.map((row) => ({
-    id: row.id,
-    name: row.name,
-    handle: null,
-    followers: row.metrics.followers,
-    logoUrl: row.cdnProfileImageUrl,
-  }));
+  const teamIds = await teamIdsFor(orgSlug);
+  const perTeam = await Promise.all(
+    teamIds.map((teamId) =>
+      request<StatsByEntityResponse>({
+        orgSlug,
+        teamId,
+        path: "/developer/v1/statsByEntity",
+        query: { groupBy: "brand", platform: platforms.join(",") },
+      }),
+    ),
+  );
+  const rows = perTeam.flatMap(({ data }) =>
+    data.map((row) => ({
+      id: row.id,
+      name: row.name,
+      handle: null,
+      followers: row.metrics.followers,
+      logoUrl: row.cdnProfileImageUrl,
+    })),
+  );
+  return dedupeBy(rows, (r) => r.id);
 }
 
 export interface EmvRow {
@@ -194,23 +224,30 @@ export async function fetchEmvByEntity(
   start: string,
   end: string,
 ): Promise<EmvRow[]> {
-  const teamId = await teamIdFor(orgSlug);
-  const { data } = await request<StatsByEntityResponse>({
-    orgSlug,
-    teamId,
-    path: "/developer/v1/statsByEntity",
-    query: {
-      groupBy: "brand",
-      platform: platforms.join(","),
-      fromDate: start,
-      toDate: end,
-    },
-  });
-  return data.map((row) => ({
-    entityId: row.id,
-    name: row.name,
-    handle: null,
-    emv: row.metrics.emv,
-    logoUrl: row.cdnProfileImageUrl,
-  }));
+  const teamIds = await teamIdsFor(orgSlug);
+  const perTeam = await Promise.all(
+    teamIds.map((teamId) =>
+      request<StatsByEntityResponse>({
+        orgSlug,
+        teamId,
+        path: "/developer/v1/statsByEntity",
+        query: {
+          groupBy: "brand",
+          platform: platforms.join(","),
+          fromDate: start,
+          toDate: end,
+        },
+      }),
+    ),
+  );
+  const rows = perTeam.flatMap(({ data }) =>
+    data.map((row) => ({
+      entityId: row.id,
+      name: row.name,
+      handle: null,
+      emv: row.metrics.emv,
+      logoUrl: row.cdnProfileImageUrl,
+    })),
+  );
+  return dedupeBy(rows, (r) => r.entityId);
 }

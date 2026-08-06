@@ -20,6 +20,16 @@ function applyOwnAccountExclusion(rows: RankedRow[], spec: ListSpec): RankedRow[
   return rows.filter((r) => r.name.toLowerCase() !== ownAccountName.toLowerCase());
 }
 
+/** Drops rows config/orgs.json has flagged as confirmed-bad data (e.g.
+ *  nfl-league's "Detroit Tigers" — an MLB club misfiled under the NFL org).
+ *  Unconditional, unlike applyOwnAccountExclusion: this isn't a per-list
+ *  editorial choice, it's removing rows that were never a real entity. */
+function applyBadDataExclusion(rows: RankedRow[], spec: ListSpec): RankedRow[] {
+  const excluded = getOrg(spec.orgSlug).excludeEntityNames.map((n) => n.toLowerCase());
+  if (excluded.length === 0) return rows;
+  return rows.filter((r) => !excluded.includes(r.name.toLowerCase()));
+}
+
 export async function buildList(spec: ListSpec): Promise<RankedList> {
   let rows: RankedRow[];
   let rawQuery: Record<string, unknown>;
@@ -63,6 +73,7 @@ export async function buildList(spec: ListSpec): Promise<RankedList> {
   }
 
   const beforeExclusion = rows.length;
+  rows = applyBadDataExclusion(rows, spec);
   rows = applyOwnAccountExclusion(rows, spec);
   rawQuery.ownAccountExcluded = spec.excludeOwnAccount && rows.length < beforeExclusion;
 

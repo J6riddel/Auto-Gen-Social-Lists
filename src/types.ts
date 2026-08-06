@@ -13,6 +13,12 @@ export interface OrgConfig {
    *  one — tracked alongside individual entities but not a peer of them.
    *  null for orgs with no such account (e.g. creators). */
   ownAccountName: string | null;
+  /** Entities confirmed to not belong in this org's data at all (wrong-sport
+   *  rows, misfiled test accounts) — a known Socialpruf-side data bug, not a
+   *  per-list judgment call. Always dropped, unlike ownAccountName which is
+   *  conditional on spec.excludeOwnAccount. Empty for orgs with no known bad
+   *  rows. */
+  excludeEntityNames: string[];
 }
 
 export interface MetricConfig {
