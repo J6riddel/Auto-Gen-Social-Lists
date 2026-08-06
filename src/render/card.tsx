@@ -15,6 +15,12 @@ import { Resvg } from "@resvg/resvg-js";
 import Jimp from "jimp";
 import { tokens as t } from "./tokens.js";
 import { getStaticTeamColor } from "./teamColors.js";
+import {
+  fetchLeaderHeadshotUrl,
+  loadEspnLeague,
+  lookupEspnTeam,
+  type EspnLeague,
+} from "./espnAssets.js";
 import { getMetric } from "../fetch/keyring.js";
 import type { MetricConfig, RankedList, RankedRow } from "../types.js";
 // Mascot-only short names for the row label (Chicago Blackhawks -> Blackhawks).
@@ -69,6 +75,10 @@ async function fetchImage(url: string): Promise<{ data: Buffer; contentType: str
   }
 }
 
+function toDataUri(image: { data: Buffer; contentType: string } | null): string | null {
+  return image ? `data:${image.contentType};base64,${image.data.toString("base64")}` : null;
+}
+
 function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
   r /= 255;
   g /= 255;
@@ -105,14 +115,65 @@ function hslToHex(h: number, s: number, l: number): string {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
-/** Card background is very dark (#12161C) — a color pulled straight off a
- *  logo could easily be near-black or washed-out and unreadable there, so
- *  hue is kept as-extracted but lightness/saturation are floored before
- *  rendering. This is what makes it safe to use on arbitrary team colors
- *  without checking each one by hand. */
+function hexToHsl(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return rgbToHsl((n >> 16) & 255, (n >> 8) & 255, n & 255);
+}
+
+/** Below this saturation a color has no hue worth preserving, and the hue
+ *  channel of an almost-grey pixel is numerically meaningless — pure black
+ *  reports hue 0, which is red. Forcing the saturation floor onto one of those
+ *  invents a color the team does not have: confirmed on the White Sox, whose
+ *  official #000000 came out of the floor as a mauve row. Teams with a
+ *  genuinely achromatic identity (White Sox, Raiders, Spurs, Nets) are
+ *  supposed to render as neutral steel, so they are routed around the floor
+ *  instead of through it. */
+const ACHROMATIC_S = 0.12;
+
+/** Card background is near-black — a color pulled straight off a logo could
+ *  easily be near-black or washed-out and unreadable there, so hue is kept
+ *  as-extracted but lightness/saturation are floored before rendering. This is
+ *  what makes it safe to use on arbitrary team colors without checking each
+ *  one by hand. */
 function toLegibleHex(r: number, g: number, b: number): string {
   const [h, s, l] = rgbToHsl(r, g, b);
+  if (s < ACHROMATIC_S) return hslToHex(0, 0, Math.max(l, 0.5));
   return hslToHex(h, Math.max(s, 0.35), Math.max(l, 0.5));
+}
+
+/** The row fill is a ramp built off the team's own color rather than a fixed
+ *  pair of dark/light values, so a team whose brand color is already bright
+ *  (Mets orange) stays bright and one that is genuinely dark (Dodgers navy)
+ *  stays dark. Multiplying the base lightness keeps that relationship; setting
+ *  absolute stops would flatten every team to the same perceived brightness
+ *  and throw away the only thing making the rows distinguishable.
+ *
+ *  Saturation is floored so a near-grey brand color still reads as colored
+ *  rather than as a broken row, and capped so it doesn't turn plastic. */
+function rowRamp(hex: string): { dark: string; mid: string; light: string; chip: string } {
+  const [h, rawS, rawL] = hexToHsl(hex);
+  // An achromatic team keeps a trace of saturation rather than none — a truly
+  // flat grey ramp reads as an unstyled row, a barely-tinted one reads as
+  // deliberate steel. See ACHROMATIC_S.
+  const s = rawS < ACHROMATIC_S ? 0.05 : Math.min(Math.max(rawS, 0.45), 0.95);
+  const l = Math.min(Math.max(rawL, 0.22), 0.52);
+  const at = (k: number) => hslToHex(h, s, Math.min(0.72, Math.max(0.06, l * k)));
+  return { dark: at(0.5), mid: at(0.85), light: at(1.22), chip: at(0.34) };
+}
+
+/** Left-to-right ramp, matching the direction the eye reads the row: rank and
+ *  name sit on the dark end, the value pill on the bright end. */
+function rowGradient(hex: string): string {
+  const { dark, mid, light } = rowRamp(hex);
+  return `linear-gradient(90deg, ${dark} 0%, ${mid} 58%, ${light} 100%)`;
+}
+
+/** The photo cell behind a headshot. Steeper and darker than a row's ramp —
+ *  it is a background for a cutout, not a surface carrying text, so it can go
+ *  further toward black at the edges without costing legibility. */
+function photoGradient(hex: string): string {
+  const { dark, mid } = rowRamp(hex);
+  return `linear-gradient(160deg, ${mid} 0%, ${dark} 62%, #0B0B0D 100%)`;
 }
 
 /** A static team color (see teamColors.ts) is the real brand hue but not
@@ -122,23 +183,6 @@ function toLegibleHex(r: number, g: number, b: number): string {
 function legibleHexFromHex(hex: string): string {
   const n = parseInt(hex.slice(1), 16);
   return toLegibleHex((n >> 16) & 255, (n >> 8) & 255, n & 255);
-}
-
-/** Turns a flat brand hue into a brushed-metal fill: same hue and a capped
- *  saturation (a fully-saturated team color reads as plastic, not metal),
- *  alternating light/dark lightness stops on a diagonal to fake the banding
- *  a real reflective surface would pick up. Used for every row's fill now,
- *  not just the leader's — accentColor already falls back to t.color.accent
- *  upstream when a row has no logo to pull a hue from. */
-function metallicGradient(hex: string): string {
-  const n = parseInt(hex.slice(1), 16);
-  const [h, s] = rgbToHsl((n >> 16) & 255, (n >> 8) & 255, n & 255);
-  const cappedS = Math.min(s, 0.5);
-  const stop = (l: number) => hslToHex(h, cappedS, l);
-  return (
-    `linear-gradient(135deg, ${stop(0.74)} 0%, ${stop(0.36)} 22%, ` +
-    `${stop(0.6)} 45%, ${stop(0.28)} 68%, ${stop(0.7)} 88%, ${stop(0.4)} 100%)`
-  );
 }
 
 // Circular hue buckets, 30 degrees wide, centered on 0/30/60/... — the
@@ -208,35 +252,90 @@ async function extractAccentColor(buf: Buffer): Promise<string | null> {
 interface RowVisual {
   dataUri: string | null;
   accent: string | null;
+  /** ESPN's mascot form when the row matched a real team, else null and the
+   *  shared teamNames.ts table decides. */
+  shortName: string | null;
 }
 
-async function resolveVisuals(rows: RankedRow[], orgSlug: string): Promise<Map<string, RowVisual>> {
+async function resolveVisuals(
+  rows: RankedRow[],
+  orgSlug: string,
+  espn: EspnLeague | null,
+): Promise<Map<string, RowVisual>> {
   const entries = await Promise.all(
     rows.map(async (r): Promise<[string, RowVisual]> => {
-      let image = r.logoUrl ? await fetchImage(r.logoUrl) : null;
+      const espnTeam = lookupEspnTeam(espn, r.name);
+
+      // ESPN's mark first: it is the crest on transparency, which is what the
+      // row's light logo panel is designed around. Socialpruf's avatar is a
+      // square platform profile picture with its own background — a correct
+      // image, but the wrong kind of image for this slot — so it stays as the
+      // fallback rather than the primary. See espnAssets.ts.
+      let image = espnTeam?.logoUrl ? await fetchImage(espnTeam.logoUrl) : null;
+      if (!image && r.logoUrl) image = await fetchImage(r.logoUrl);
       // Primary failed (dead URL, or an unsupported format like TikTok's
       // WebP) — retry once against the same brand's Instagram avatar before
       // falling back to the placeholder. See build.ts's logoUrlFallback.
       if (!image && r.logoUrlFallback && r.logoUrlFallback !== r.logoUrl) {
         image = await fetchImage(r.logoUrlFallback);
       }
-      const dataUri = image ? `data:${image.contentType};base64,${image.data.toString("base64")}` : null;
 
-      // A known team's real color (see teamColors.ts) always wins over
-      // pixel-extraction from whatever avatar Socialpruf happened to cache —
-      // extraction is a guess, this isn't. Extraction only runs at all when
-      // there's no static entry (the "creators" org today).
-      const staticColor = getStaticTeamColor(orgSlug, r.name);
-      const accent = staticColor
-        ? legibleHexFromHex(staticColor)
+      // The hand-curated table outranks ESPN's `color`, which reports the
+      // team's *first* official color rather than its most recognizable one —
+      // it gives navy for the Red Sox and for the Tigers, both of which read
+      // as the wrong team on a card. ESPN slots in behind it as the fallback
+      // for teams the table deliberately omits (the achromatic identities:
+      // White Sox, Raiders, Spurs, Nets), where #000000 is genuinely correct
+      // and now renders as neutral steel rather than a fabricated hue. Pixel
+      // extraction stays last, for orgs with no league at all.
+      const knownColor = getStaticTeamColor(orgSlug, r.name) ?? espnTeam?.color ?? null;
+      const accent = knownColor
+        ? legibleHexFromHex(knownColor)
         : image
           ? await extractAccentColor(image.data)
           : null;
 
-      return [r.entityId, { dataUri, accent }];
+      return [
+        r.entityId,
+        { dataUri: toDataUri(image), accent, shortName: espnTeam?.shortName ?? null },
+      ];
     }),
   );
   return new Map(entries);
+}
+
+export interface FaceVisual {
+  dataUri: string;
+  accent: string;
+}
+
+/** Headshots for the photo panel: the statistical leader of each of the top
+ *  entities. Two network hops per face (leaders, then the image), which is why
+ *  it is scoped to the handful of rows the panel actually shows rather than
+ *  the whole list. Any failure just means a shorter panel — see Card. */
+async function resolveFaces(
+  rows: RankedRow[],
+  espn: EspnLeague | null,
+  visuals: Map<string, RowVisual>,
+): Promise<FaceVisual[]> {
+  if (!espn) return [];
+  const today = new Date();
+
+  const faces = await Promise.all(
+    rows.slice(0, t.photo.cells).map(async (r): Promise<FaceVisual | null> => {
+      const team = lookupEspnTeam(espn, r.name);
+      if (!team) return null;
+      const url = await fetchLeaderHeadshotUrl(espn, team.teamId, today);
+      if (!url) return null;
+      const dataUri = toDataUri(await fetchImage(url));
+      if (!dataUri) return null;
+      return { dataUri, accent: visuals.get(r.entityId)?.accent ?? t.color.accent };
+    }),
+  );
+
+  // Collapsed rather than gapped: a missing face for the #1 team should let
+  // #2's photo take the space, not leave a hole where a photo was expected.
+  return faces.filter((f): f is FaceVisual => f !== null);
 }
 
 /** Unlike row logos, the socialpruf mark is not decoration — every card must
@@ -251,17 +350,75 @@ function clamp(v: number, [min, max]: [number, number]): number {
   return Math.min(max, Math.max(min, v));
 }
 
+/** Rough advance widths for Anton, as a fraction of font size. Only used to
+ *  size the value pill — Satori will not measure text for us, and every value
+ *  pill has to be the same width or the right edge of the card jitters row to
+ *  row. Deliberately generous: over-estimating costs a few px of pill, while
+ *  under-estimating clips a number, and a clipped number is a wrong number. */
+const ANTON_ADVANCE: Record<string, number> = { ",": 0.26, ".": 0.26, "%": 0.72, $: 0.5, "+": 0.5, "-": 0.32 };
+const ANTON_DIGIT_ADVANCE = 0.48;
+
+function estimateWidth(text: string, fontSize: number): number {
+  let em = 0;
+  for (const ch of text) em += ANTON_ADVANCE[ch] ?? ANTON_DIGIT_ADVANCE;
+  return Math.ceil(em * fontSize);
+}
+
+/** Uppercase advances for Anton, same units as ANTON_ADVANCE. Only the
+ *  outliers are listed — anything unlisted takes the default. */
+const ANTON_CAP_ADVANCE: Record<string, number> = {
+  I: 0.24, J: 0.36, L: 0.38, M: 0.66, W: 0.68, " ": 0.2,
+  1: 0.34, ",": 0.24, ".": 0.24, "/": 0.32, "-": 0.3, "'": 0.2,
+};
+const ANTON_CAP_DEFAULT = 0.46;
+
+/** Deliberately 8% over true width. This feeds the row-height budget, and the
+ *  two error directions are not symmetric: over-estimating the line count
+ *  makes rows slightly shorter and leaves a little slack above the footer,
+ *  while under-estimating sizes rows for space the header is actually using
+ *  and pushes the footer off the canvas. Biased toward the harmless one. */
+const ESTIMATE_SAFETY = 1.08;
+
+function estimateCapsWidth(text: string, fontSize: number): number {
+  let em = 0;
+  for (const ch of text.toUpperCase()) em += ANTON_CAP_ADVANCE[ch] ?? ANTON_CAP_DEFAULT;
+  return em * fontSize * ESTIMATE_SAFETY;
+}
+
+/** Greedy word wrap, matching what Satori will do with the same string, so the
+ *  row list can be sized against the header this title will actually occupy
+ *  rather than against the worst case every time. Without it a two-line title
+ *  still reserved three lines' worth of space and left a visible band of dead
+ *  canvas under the last row. Capped at `maxLines` because the title element
+ *  is itself capped there — see Card. */
+function estimateLines(text: string, fontSize: number, width: number, maxLines: number): number {
+  let lines = 1;
+  let used = 0;
+  for (const word of text.split(/\s+/)) {
+    const w = estimateCapsWidth(word, fontSize);
+    const spaced = used === 0 ? w : used + estimateCapsWidth(" ", fontSize) + w;
+    if (spaced > width && used > 0) {
+      lines++;
+      used = w;
+    } else {
+      used = spaced;
+    }
+  }
+  return Math.min(lines, maxLines);
+}
+
 interface RowMetrics {
   rowH: number;
   rowGap: number;
   padX: number;
-  rankW: number;
   rank: number;
-  logoSize: number;
   logoGap: number;
   name: number;
-  nameGap: number;
   value: number;
+  /** Uniform across every row in a column — see estimateWidth. */
+  valueW: number;
+  rankChipW: number;
+  logoPanelW: number;
 }
 
 /** Rows stretch or compress to exactly fill the fixed canvas regardless of
@@ -271,8 +428,14 @@ interface RowMetrics {
  *  type and logo size scale much less, so a short list reads as "roomy,"
  *  not "giant text." `visualRows` is the tallest column's row count: the
  *  full list in single-column mode, half of it in two-column mode. */
-function computeRowMetrics(visualRows: number, skinny: boolean): RowMetrics {
-  const available = t.size.h - t.space.pad * 2 - t.layout.headerBudget - t.layout.footerBudget;
+function computeRowMetrics(
+  visualRows: number,
+  skinny: boolean,
+  values: string[],
+  headerHeight: number,
+  columnWidth: number,
+): RowMetrics {
+  const available = t.size.h - t.space.pad * 2 - headerHeight - t.layout.footerBudget;
   const rowUnit = available / visualRows;
 
   const base = skinny
@@ -280,24 +443,18 @@ function computeRowMetrics(visualRows: number, skinny: boolean): RowMetrics {
         rowH: t.spaceTwoCol.rowH,
         rowGap: t.spaceTwoCol.rowGap,
         padX: t.spaceTwoCol.padX,
-        rankW: t.spaceTwoCol.rankW,
         rank: t.typeTwoCol.rank,
-        logoSize: t.spaceTwoCol.logoSize,
         logoGap: 10,
         name: t.typeTwoCol.name,
-        nameGap: 12,
         value: t.typeTwoCol.value,
       }
     : {
         rowH: t.space.rowH,
         rowGap: t.space.rowGap,
         padX: t.space.padX,
-        rankW: t.space.rankW,
         rank: t.type.rank,
-        logoSize: t.space.logoSize,
         logoGap: 16,
         name: t.type.name,
-        nameGap: 20,
         value: t.type.value,
       };
 
@@ -305,17 +462,34 @@ function computeRowMetrics(visualRows: number, skinny: boolean): RowMetrics {
   const heightScale = clamp(rowUnit / baseUnit, t.layout.heightScaleRange);
   const fontScale = clamp(rowUnit / baseUnit, t.layout.fontScaleRange);
 
+  const value = Math.max(14, Math.round(base.value * fontScale));
+  const widest = values.reduce((max, v) => Math.max(max, estimateWidth(v, value)), 0);
+
+  const rowH = Math.round(base.rowH * heightScale);
+  const logoGap = Math.round(base.logoGap * fontScale);
+  const valueW = widest + base.padX * 2;
+  const namePillW = columnWidth - valueW - logoGap;
+
+  // The rank chip and logo panel are square-ish blocks keyed to row height, so
+  // on a short list — where rows stretch to nearly double height to fill the
+  // canvas — they grow sideways into space the team name needs, and a name
+  // like SEAHAWKS starts to crowd. Capping them as a fraction of the pill's
+  // own width is what keeps the proportions stable across row counts: they
+  // track row height until that would cost the name its measure, then stop.
+  const rankChipW = Math.round(Math.min(rowH * 0.78, namePillW * 0.15));
+  const logoPanelW = Math.round(Math.min(rowH * 1.35, namePillW * 0.24));
+
   return {
-    rowH: Math.round(base.rowH * heightScale),
+    rowH,
+    rankChipW,
+    logoPanelW,
+    valueW,
     rowGap: Math.max(2, Math.round(base.rowGap * heightScale)),
     padX: base.padX,
-    rankW: Math.round(base.rankW * fontScale),
     rank: Math.max(12, Math.round(base.rank * fontScale)),
-    logoSize: Math.max(16, Math.round(base.logoSize * fontScale)),
-    logoGap: Math.round(base.logoGap * fontScale),
+    logoGap,
     name: Math.max(14, Math.round(base.name * fontScale)),
-    nameGap: Math.round(base.nameGap * fontScale),
-    value: Math.max(14, Math.round(base.value * fontScale)),
+    value,
   };
 }
 
@@ -326,6 +500,7 @@ function Row({
   metrics,
   logoDataUri,
   accentColor,
+  shortName,
 }: {
   row: RankedRow;
   rank: number;
@@ -333,29 +508,39 @@ function Row({
   metrics: RowMetrics;
   logoDataUri: string | null;
   accentColor: string | null;
+  shortName: string | null;
 }) {
-  // Every row now fills with a brushed-metal gradient built off the entity's
-  // extracted brand hue (or t.color.accent when a row has no logo/color to
-  // pull from — see extractAccentColor). Row text is pinned to white
-  // regardless of that fill's contrast pick.
+  // Every row fills with a ramp built off the entity's own brand color (or
+  // t.color.accent when a row has no logo/color to pull from — see
+  // extractAccentColor). Row text is pinned to white regardless of that
+  // fill's contrast pick.
   const baseHue = accentColor ?? t.color.accent;
-  const nameColor = "#FFFFFF";
-  const valueColor = "#FFFFFF";
+  const ramp = rowRamp(baseHue);
+  const gradient = rowGradient(baseHue);
+
   // Scaled off the row's own height, not a fixed pixel value, so the corner
   // reads the same proportionally whether rows are stretched tall (a short
   // list) or compact (two-column mode).
-  const radius = Math.max(6, Math.round(metrics.rowH * 0.16));
-  const borderWidth = Math.max(1, Math.round(metrics.rowH * 0.02));
+  const radius = Math.max(6, Math.round(metrics.rowH * 0.14));
+  const borderWidth = Math.max(2, Math.round(metrics.rowH * 0.028));
+  // Fits the panel with a margin on every side, so a wide mark (a wordmark
+  // crest) and a tall one (a shield) both sit inside it rather than touching
+  // the edges.
+  const logoSize = Math.round(Math.min(metrics.rowH * 0.74, metrics.logoPanelW * 0.78));
 
-  // Logo panel is a hard square, exactly the row's height — "fills the left
-  // square portion" — with its right edge cut on a diagonal instead of
-  // running straight down. The row's own overflow: hidden + borderRadius
-  // below is what rounds the panel's top-left/bottom-left corners to match
-  // the pill, rather than duplicating the radius on the panel itself.
-  const logoSize = metrics.rowH;
-  const slash = Math.round(logoSize * 0.24);
-  const numberSize = Math.max(14, Math.round(logoSize * 0.32));
-  const numberInset = Math.max(4, Math.round(logoSize * 0.09));
+  // Shared by the name pill and the value pill so the two read as one object
+  // split in half rather than two unrelated shapes.
+  const pillFrame = {
+    display: "flex",
+    alignItems: "center",
+    height: metrics.rowH,
+    backgroundImage: gradient,
+    borderRadius: radius,
+    borderWidth,
+    borderStyle: "solid",
+    borderColor: "rgba(255,255,255,0.82)",
+    overflow: "hidden",
+  } as const;
 
   return (
     <div
@@ -363,126 +548,84 @@ function Row({
       style={{
         display: "flex",
         alignItems: "center",
-        position: "relative",
-        overflow: "hidden",
-        height: metrics.rowH,
         marginBottom: metrics.rowGap,
-        paddingRight: metrics.padX,
-        backgroundImage: metallicGradient(baseHue),
-        borderRadius: radius,
-        borderWidth,
-        borderStyle: "solid",
-        borderColor: "#FFFFFF",
-        // The fill itself now separates rows (via the marginBottom gap
-        // above) — a straight rule line across a rounded rectangle would cut
-        // across the curved corners, so it's dropped in favor of the gap.
       }}
     >
-      {/* Legibility fade for the value text sitting on a bright metallic
-          fill — transparent through the left/center of the row, darkening
-          toward the right edge where the number sits. zIndex keeps it
-          behind the logo/name/value content instead of painting over it. */}
-      <div
-        style={{
-          display: "flex",
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundImage:
-            "linear-gradient(to right, transparent 0%, transparent 50%, rgba(0,0,0,0.55) 100%)",
-          zIndex: 0,
-        }}
-      />
-      <div
-        style={{
-          display: "flex",
-          position: "relative",
-          flexShrink: 0,
-          width: logoSize,
-          height: logoSize,
-          marginRight: metrics.logoGap,
-          backgroundImage: metallicGradient(baseHue),
-          overflow: "hidden",
-          clipPath: `polygon(0px 0px, ${logoSize}px 0px, ${logoSize - slash}px ${logoSize}px, 0px ${logoSize}px)`,
-          zIndex: 1,
-        }}
-      >
-        {logoDataUri ? (
-          <img
-            src={logoDataUri}
-            width={logoSize}
-            height={logoSize}
-            style={{ width: logoSize, height: logoSize, objectFit: "cover" }}
-          />
-        ) : null}
-        {/* Legibility fade for the rank number — black at the bottom edge of
-            the logo panel, fading up to transparent by a third of the way
-            into the image, so the number stays readable over light logos. */}
+      <div style={{ ...pillFrame, flexGrow: 1, minWidth: 0, marginRight: metrics.logoGap }}>
+        {/* Rank sits in its own darker block at the head of the pill rather
+            than floating over the logo — at two-column scale a number on top
+            of a crest is unreadable, and the reference treatment reads as a
+            table index, which is what it is. */}
         <div
           style={{
             display: "flex",
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundImage:
-              "linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 45%)",
-            zIndex: 1,
-          }}
-        />
-        <div
-          style={{
-            display: "flex",
-            position: "absolute",
-            left: numberInset,
-            bottom: numberInset,
-            fontSize: numberSize,
+            flexShrink: 0,
+            alignItems: "center",
+            justifyContent: "center",
+            width: metrics.rankChipW,
+            height: metrics.rowH,
+            backgroundColor: ramp.chip,
             fontFamily: t.font.display,
-            fontWeight: 700,
+            fontSize: metrics.rank,
             color: "#FFFFFF",
-            textShadow: "0 2px 6px rgba(0,0,0,0.55)",
-            zIndex: 2,
           }}
         >
-          {String(rank).padStart(2, "0")}
+          {rank}
+        </div>
+        <div
+          style={{
+            display: "flex",
+            flexGrow: 1,
+            minWidth: 0, // without this a flex item won't shrink past its content
+            // width, so long names can run straight into the logo panel with
+            // zero gap — confirmed happening on real team names before this fix.
+            overflow: "hidden",
+            whiteSpace: "nowrap",
+            textOverflow: "ellipsis",
+            paddingLeft: metrics.padX,
+            paddingRight: metrics.padX,
+            fontFamily: t.font.display,
+            fontSize: metrics.name,
+            color: "#FFFFFF",
+          }}
+        >
+          {(shortName ?? displayName(row.name)).toUpperCase()}
+        </div>
+        {/* Light panel so a full-color crest on transparency reads the same
+            for every team. Drawn even when the logo is missing, so the pill's
+            right edge stays consistent down the column. */}
+        <div
+          style={{
+            display: "flex",
+            flexShrink: 0,
+            alignItems: "center",
+            justifyContent: "center",
+            width: metrics.logoPanelW,
+            height: metrics.rowH,
+            backgroundColor: t.color.logoPanel,
+          }}
+        >
+          {logoDataUri ? (
+            <img
+              src={logoDataUri}
+              width={logoSize}
+              height={logoSize}
+              style={{ width: logoSize, height: logoSize, objectFit: "contain" }}
+            />
+          ) : null}
         </div>
       </div>
       <div
         style={{
-          display: "flex",
-          flexGrow: 1,
-          minWidth: 0, // without this a flex item won't shrink past its content
-          // width, so long names can run straight into the value column with
-          // zero gap — confirmed happening on real team names before this fix.
-          overflow: "hidden",
-          whiteSpace: "nowrap",
-          textOverflow: "ellipsis",
-          marginRight: metrics.nameGap,
-          fontSize: metrics.name,
-          color: nameColor,
-          fontWeight: 700,
-          position: "relative",
-          zIndex: 1,
-        }}
-      >
-        {displayName(row.name)}
-      </div>
-      <div
-        style={{
-          display: "flex",
+          ...pillFrame,
           flexShrink: 0, // name already yields via minWidth:0 + ellipsis above;
-          // pinning this to its content width is what stops a long name from
+          // pinning this to its computed width is what stops a long name from
           // squeezing the number itself off the row.
-          whiteSpace: "nowrap",
+          justifyContent: "center",
+          width: metrics.valueW,
+          fontFamily: t.font.display,
           fontSize: metrics.value,
-          fontFamily: t.font.mono,
-          fontWeight: 700,
-          color: valueColor,
-          position: "relative",
-          zIndex: 1,
+          color: "#FFFFFF",
         }}
       >
         {formatValue(row.value, metric)}
@@ -490,6 +633,21 @@ function Row({
     </div>
   );
 }
+
+// Header geometry, shared by the JSX below and by the height estimate that
+// sizes the row list. Kept as constants rather than inlined in both places
+// because the two have to agree — if the render used one leading and the
+// estimate another, rows would be sized against a header that doesn't exist.
+const TITLE_MAX_LINES = 3;
+const CAVEAT_MAX_LINES = 2;
+// Anton's caps are tall and its default leading leaves a visible band of air
+// between lines; tightening it is what makes a multi-line headline read as one
+// block. Not tighter than this: at 0.92 a comma on one line descended into the
+// caps of the next, which reads as a rendering artifact rather than as style.
+const TITLE_LEADING = 1.05;
+const CAVEAT_LEADING = 1.3;
+const CAVEAT_GAP = 12;
+const HEADER_MARGIN = 30;
 
 function footerLine(list: RankedList): string {
   const { spec } = list;
@@ -501,27 +659,163 @@ function footerLine(list: RankedList): string {
   return `${spec.platforms.join("+")} · ${range}`;
 }
 
-function Card({
-  list,
-  visuals,
-  brandLogo,
-}: {
-  list: RankedList;
-  visuals: Map<string, RowVisual>;
-  brandLogo: string;
-}) {
-  const { spec, rows } = list;
-  const metric = getMetric(spec.metric);
-  // Explicit width, not just flexGrow — Satori sizes a flex item to its
-  // content first and only grows from there, so without a hard width a long
-  // title can push past the canvas edge instead of wrapping inside it.
-  const fullWidth = t.size.w - t.space.pad * 2;
+/** Faint diagonal streaks over the background, the way a broadcast graphic
+ *  bed is lit. Rotated bars rather than a repeating-linear-gradient because
+ *  Satori implements the plain gradient functions only. Purely atmospheric —
+ *  every one of these is under 4% opacity. */
+function BackgroundTexture() {
+  const bars = [-140, 40, 260, 520, 760, 1010];
+  return (
+    <div
+      style={{
+        display: "flex",
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: t.size.w,
+        height: t.size.h,
+        overflow: "hidden",
+      }}
+    >
+      {bars.map((left, i) => (
+        <div
+          key={i}
+          style={{
+            display: "flex",
+            position: "absolute",
+            top: -400,
+            left,
+            width: i % 2 === 0 ? 120 : 46,
+            height: t.size.h + 800,
+            backgroundImage:
+              "linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.035) 45%, rgba(255,255,255,0) 100%)",
+            transform: "rotate(18deg)",
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Full-bleed column of headshots down the right edge. Absolutely positioned
+ *  rather than a flex sibling so it can run past the card's padding to the
+ *  canvas edge, which is what makes it read as photography rather than as
+ *  another boxed element. */
+function PhotoPanel({ faces, width }: { faces: FaceVisual[]; width: number }) {
+  const cellH = Math.round(t.size.h / faces.length);
 
   return (
     <div
       style={{
         display: "flex",
         flexDirection: "column",
+        position: "absolute",
+        top: 0,
+        right: 0,
+        width,
+        height: t.size.h,
+      }}
+    >
+      {faces.map((face, i) => {
+        // The cutouts are head-and-shoulders on transparency with generous
+        // empty margins, so they are drawn wider than the cell and bottom-
+        // anchored: the head fills the slot and the surplus transparent
+        // margin is what gets clipped, not the subject.
+        const imgW = Math.round(width * 1.9);
+        const imgH = Math.round(imgW * 0.73);
+        return (
+          <div
+            key={i}
+            style={{
+              display: "flex",
+              position: "relative",
+              alignItems: "flex-end",
+              justifyContent: "center",
+              width,
+              height: cellH,
+              overflow: "hidden",
+              backgroundImage: photoGradient(face.accent),
+            }}
+          >
+            <img
+              src={face.dataUri}
+              width={imgW}
+              height={imgH}
+              style={{ width: imgW, height: imgH, objectFit: "contain" }}
+            />
+            {/* Seam softener where one cell meets the next, and where the
+                panel meets the list column. Without it the two photos read as
+                two pasted rectangles. */}
+            <div
+              style={{
+                display: "flex",
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width,
+                height: cellH,
+                backgroundImage:
+                  "linear-gradient(90deg, rgba(11,11,13,0.75) 0%, rgba(11,11,13,0) 26%)",
+              }}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Card({
+  list,
+  visuals,
+  faces,
+  brandLogo,
+}: {
+  list: RankedList;
+  visuals: Map<string, RowVisual>;
+  faces: FaceVisual[];
+  brandLogo: string;
+}) {
+  const { spec, rows } = list;
+  const metric = getMetric(spec.metric);
+  const twoColumn = rows.length >= t.layout.twoColumnThreshold;
+
+  // The photo panel only exists in single-column mode. Two columns of rows
+  // already consume the full measure, and stealing a third of the width for
+  // photography would force team names into ellipsis — the list is the
+  // deliverable, the photography is the frame around it.
+  const showPhotos = !twoColumn && faces.length > 0;
+  const photoW = showPhotos ? Math.round(t.size.w * t.photo.widthRatio) : 0;
+
+  // Explicit width, not just flexGrow — Satori sizes a flex item to its
+  // content first and only grows from there, so without a hard width a long
+  // title can push past the canvas edge instead of wrapping inside it.
+  const fullWidth = t.size.w - t.space.pad * 2 - photoW;
+  const values = rows.map((r) => formatValue(r.value, metric));
+
+  // What the header will really occupy, not what it is allowed to occupy.
+  // headerBudget stays as the hard ceiling the title/caveat caps enforce; this
+  // is the measurement the row list is sized against so a short title gives
+  // its unused lines back to the rows instead of leaving dead canvas.
+  const titleLines = estimateLines(spec.title, t.type.title, fullWidth, TITLE_MAX_LINES);
+  const caveatLines = spec.caveat
+    ? estimateLines(spec.caveat, t.type.subtitle, fullWidth, CAVEAT_MAX_LINES)
+    : 0;
+  const headerHeight = Math.min(
+    t.layout.headerBudget,
+    Math.round(
+      titleLines * t.type.title * TITLE_LEADING +
+        (caveatLines > 0 ? CAVEAT_GAP + caveatLines * t.type.subtitle * CAVEAT_LEADING : 0) +
+        HEADER_MARGIN,
+    ),
+  );
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        position: "relative",
         width: t.size.w,
         height: t.size.h,
         backgroundColor: t.color.bg,
@@ -529,45 +823,58 @@ function Card({
         fontFamily: t.font.display,
       }}
     >
-      <div style={{ display: "flex", flexDirection: "column", width: fullWidth, marginBottom: 44 }}>
+      <BackgroundTexture />
+      {showPhotos ? <PhotoPanel faces={faces} width={photoW} /> : null}
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          position: "relative",
+          width: fullWidth,
+          marginBottom: HEADER_MARGIN,
+        }}
+      >
         <div
           style={{
             display: "flex",
             fontSize: t.type.title,
             color: t.color.text,
-            fontWeight: 700,
-            lineHeight: 1.1,
-            // Hard cap, not a hope — layout.headerBudget is sized to match
-            // this exactly. Real judgment output has actually hit 3 wrapped
-            // lines at max title length + this font size (confirmed against
-            // live data), so "should usually fit in 2" isn't safe enough;
-            // without a real cap, an unusually long title/caveat pushes the
-            // whole row list down and clips the footer off the canvas.
-            maxHeight: t.type.title * 1.1 * 3,
+            lineHeight: TITLE_LEADING,
+            maxHeight: Math.round(t.type.title * TITLE_LEADING * TITLE_MAX_LINES),
             overflow: "hidden",
           }}
         >
-          {spec.title}
+          {/* Hard cap, not a hope — layout.headerBudget is sized to match the
+              maxHeight above exactly. Real judgment output has actually hit 3
+              wrapped lines at max title length + this font size (confirmed
+              against live data), so "should usually fit in 2" isn't safe
+              enough; without a real cap, an unusually long title/caveat pushes
+              the whole row list down and clips the footer off the canvas. */}
+          {spec.title.toUpperCase()}
         </div>
         {spec.caveat ? (
           <div
             style={{
               display: "flex",
+              fontFamily: t.font.body,
+              fontWeight: 700,
               fontSize: t.type.subtitle,
-              color: t.color.dim,
-              marginTop: 14,
-              lineHeight: 1.3,
-              maxHeight: t.type.subtitle * 1.3 * 2,
+              letterSpacing: 1.2,
+              color: t.color.text,
+              marginTop: CAVEAT_GAP,
+              lineHeight: CAVEAT_LEADING,
+              maxHeight: Math.round(t.type.subtitle * CAVEAT_LEADING * CAVEAT_MAX_LINES),
               overflow: "hidden",
             }}
           >
-            {spec.caveat}
+            {spec.caveat.toUpperCase()}
           </div>
         ) : null}
       </div>
 
-      {rows.length >= t.layout.twoColumnThreshold ? (
-        <div style={{ display: "flex", flexDirection: "row" }}>
+      {twoColumn ? (
+        <div style={{ display: "flex", flexDirection: "row", position: "relative" }}>
           {(() => {
             const mid = Math.ceil(rows.length / 2);
             const left = rows.slice(0, mid);
@@ -578,7 +885,7 @@ function Card({
             // column one row short — it keeps the left column's row size and
             // stops early with a gap beneath, rather than stretching its
             // rows taller to fake an equal row count.
-            const metrics = computeRowMetrics(mid, true);
+            const metrics = computeRowMetrics(mid, true, values, headerHeight, (fullWidth - t.layout.columnGap) / 2);
             // Explicit width per column, not flexGrow — flexGrow alone (even
             // with flexBasis: 0) produced overlapping, unusable columns here;
             // computing the split by hand is what the single-column title
@@ -604,6 +911,7 @@ function Card({
                       metrics={metrics}
                       logoDataUri={visuals.get(r.entityId)?.dataUri ?? null}
                       accentColor={visuals.get(r.entityId)?.accent ?? null}
+                      shortName={visuals.get(r.entityId)?.shortName ?? null}
                     />
                   ))}
                 </div>
@@ -617,6 +925,7 @@ function Card({
                       metrics={metrics}
                       logoDataUri={visuals.get(r.entityId)?.dataUri ?? null}
                       accentColor={visuals.get(r.entityId)?.accent ?? null}
+                      shortName={visuals.get(r.entityId)?.shortName ?? null}
                     />
                   ))}
                 </div>
@@ -625,9 +934,16 @@ function Card({
           })()}
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column" }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            position: "relative",
+            width: fullWidth,
+          }}
+        >
           {(() => {
-            const metrics = computeRowMetrics(rows.length, false);
+            const metrics = computeRowMetrics(rows.length, false, values, headerHeight, fullWidth);
             return rows.map((r, i) => (
               <Row
                 key={r.entityId}
@@ -637,6 +953,7 @@ function Card({
                 metrics={metrics}
                 logoDataUri={visuals.get(r.entityId)?.dataUri ?? null}
                 accentColor={visuals.get(r.entityId)?.accent ?? null}
+                shortName={visuals.get(r.entityId)?.shortName ?? null}
               />
             ));
           })()}
@@ -648,6 +965,12 @@ function Card({
           display: "flex",
           flexDirection: "row",
           alignItems: "center",
+          position: "relative",
+          // Constrained like every other block on the list side. The photo
+          // panel is absolutely positioned and therefore does not push flex
+          // siblings aside — without an explicit width the methodology line
+          // ran full-bleed and its tail disappeared underneath the photos.
+          width: fullWidth,
           marginTop: 32,
         }}
       >
@@ -674,15 +997,21 @@ function Card({
 
 async function loadFonts() {
   // Drop the .ttf files into fonts/ — see fonts/README.md.
+  const anton = await readFile("fonts/Anton-Regular.ttf");
   return [
+    // Anton ships one weight. Registering it at both 400 and 700 means a
+    // `fontWeight: 700` anywhere in the tree resolves to Anton rather than
+    // silently falling through to the next registered family.
+    { name: t.font.display, data: anton, weight: 400 as const, style: "normal" as const },
+    { name: t.font.display, data: anton, weight: 700 as const, style: "normal" as const },
     {
-      name: t.font.display,
+      name: t.font.body,
       data: await readFile("fonts/Inter-Regular.ttf"),
       weight: 400 as const,
       style: "normal" as const,
     },
     {
-      name: t.font.display,
+      name: t.font.body,
       data: await readFile("fonts/Inter-Bold.ttf"),
       weight: 700 as const,
       style: "normal" as const,
@@ -697,17 +1026,26 @@ async function loadFonts() {
 }
 
 export async function renderCard(list: RankedList): Promise<{ svg: string; png: Buffer }> {
+  // ESPN art direction is best-effort and never blocks: loadEspnLeague returns
+  // null on any failure and every consumer treats that as "use what fetch gave
+  // us." See espnAssets.ts.
+  const espn = await loadEspnLeague(list.spec.orgSlug);
+
   const [visuals, fonts, brandLogo] = await Promise.all([
-    resolveVisuals(list.rows, list.spec.orgSlug),
+    resolveVisuals(list.rows, list.spec.orgSlug, espn),
     loadFonts(),
     loadBrandLogo(),
   ]);
+  const faces = await resolveFaces(list.rows, espn, visuals);
 
-  const svg = await satori(<Card list={list} visuals={visuals} brandLogo={brandLogo} />, {
-    width: t.size.w,
-    height: t.size.h,
-    fonts,
-  });
+  const svg = await satori(
+    <Card list={list} visuals={visuals} faces={faces} brandLogo={brandLogo} />,
+    {
+      width: t.size.w,
+      height: t.size.h,
+      fonts,
+    },
+  );
 
   const png = new Resvg(svg, {
     fitTo: { mode: "width", value: t.size.w },
