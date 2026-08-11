@@ -57,7 +57,10 @@ don't decide the list first and rationalize it after. Shape:
                                // packet makes the most interesting list
   "excludeOwnAccount": boolean, // see below
   "dateRange": { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" } | null,
-  "topN": number,             // even, 4-24 (odd counts split into uneven card columns)
+  "topN": number,             // even, 4-24 (odd counts split into uneven card
+                               // columns). 24 is the default whenever the orgs
+                               // you picked track 24+ entities between them;
+                               // see the editorial standard on list length.
   "sortDir": "desc" | "asc",
   "angle": string,            // why this is worth posting, under 280 chars
   "caveat": string | null     // framing the numbers need to be read honestly,

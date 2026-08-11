@@ -67,6 +67,19 @@ in the replies costs more than a ranking that never shipped.
 - If coverage is partial, either say "of the N we track" in the title or pick a
   different list.
 
+## List length
+
+- 24 rows is the house shape. When the orgs you picked track 24 or more
+  rankable entities between them (packet.orgs[].entityCount, summed), default
+  to topN 24 — the card renders it as two columns of twelve, and the deep part
+  of the table is where the argument lives.
+- Go shorter only when the shorter list is the better one, and be able to say
+  why: the roster genuinely doesn't reach 24 (rank it whole instead), a
+  subgroup is the story, rowKind "org" fixes the count at one row per org, or
+  the tail of the ranking is noise that would undercut the claim.
+- Never pad. If 24 rows means including entities with missing or stale data to
+  reach the number, that is a shorter list, not a 24-row one.
+
 ## College football
 
 - Call a program by its school, not its mascot. "Alabama", "Ohio State", "Ole

@@ -26,6 +26,21 @@ function captionText(res: Anthropic.Message): string {
     .trim();
 }
 
+/** The system prompt asks for no em dash, but asking is not a guarantee and an
+ *  em dash in the copy is never acceptable, so it gets removed rather than
+ *  rejected: a rejection can still lose (both attempts can come back with one,
+ *  and then a paid run dies at the last step), while a substitution cannot.
+ *  Runs before captionProblem so the length is measured on what actually ships. */
+function stripEmDashes(text: string): string {
+  return text
+    .replace(/\s*—\s*/g, ", ")
+    // The dash was doing a job some other punctuation already does in these
+    // spots; leaving the comma in would read as a typo.
+    .replace(/,\s*([,.;:!?])/g, "$1")
+    .replace(/,\s*$/, "")
+    .trim();
+}
+
 function captionProblem(text: string): string | null {
   if (text.length < MIN_CAPTION_LENGTH) {
     return `It is ${text.length} characters; use at least ${MIN_CAPTION_LENGTH}.`;
@@ -62,7 +77,10 @@ story," "let that sink in," "not just," "actually landing," "moving the needle,"
 
 Return only the post text. Write one or two sentences totaling ${MIN_CAPTION_LENGTH}-${MAX_CAPTION_LENGTH}
 characters, including spaces. Aim for 140-190 characters. No headline, hashtags,
-emoji, quotation marks around the caption, or em dash.`;
+emoji, or quotation marks around the caption.
+
+Never use an em dash. Where you would reach for one, use a comma, a colon, or a
+second sentence instead.`;
 
   const facts = JSON.stringify({
     title: list.spec.title,
@@ -81,7 +99,7 @@ emoji, quotation marks around the caption, or em dash.`;
       messages: [{ role: "user", content: `${facts}${feedback}` }],
     });
 
-    const caption = captionText(res);
+    const caption = stripEmDashes(captionText(res));
     const problem = captionProblem(caption);
     if (!problem) return caption;
     feedback = `\n\nYour previous draft was rejected: ${problem} Rewrite it from scratch.`;
