@@ -26,20 +26,27 @@ interface EspnTeamsResponse {
           shortDisplayName?: string;
           name?: string;
           location?: string;
+          abbreviation?: string;
         };
       }>;
     }>;
   }>;
 }
 
-/** Same normalization on both sides of the comparison: lowercase, strip
- *  anything that isn't a letter/digit/space, collapse whitespace. Deliberately
- *  not routed through teamNames.ts's canonicalTeamKey — that table is exactly
- *  the kind of hand-maintained list this check exists to not depend on. */
+/** Same normalization on both sides of the comparison: lowercase, punctuation
+ *  to a space, collapse whitespace. Deliberately not routed through
+ *  teamNames.ts's canonicalTeamKey — that table is exactly the kind of
+ *  hand-maintained list this check exists to not depend on.
+ *
+ *  Punctuation becomes a space rather than being deleted because the two sides
+ *  disagree about the space, not just the mark: Socialpruf's "St.Louis Blues"
+ *  against ESPN's "St. Louis Blues" collapsed to "stlouis"/"st louis" and
+ *  dropped a real team. Both sides run through here, so widening the split
+ *  cannot desynchronize them. */
 function normalize(name: string): string {
   return name
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -62,13 +69,81 @@ function acceptedNames(
   return forms.filter((n): n is string => Boolean(n)).map(normalize);
 }
 
+interface LeagueRoster {
+  /** Every accepted name form, already normalized. */
+  names: Set<string>;
+  /** Mascot/location pairs, for the city-alias fallback below. Populated only
+   *  for mascot-style orgs — nothing reads it otherwise. */
+  cityForms: Array<{ mascot: string; location: string; abbreviation: string | null }>;
+}
+
+/** Whether `abbr` is `phrase` with each word cut short: every word must
+ *  contribute at least its first letter, in order, and nothing may be left
+ *  over. Covers plain initialisms ("la" / "los angeles") and the partial kind
+ *  ("okc" / "oklahoma city") that a first-letters-only rule misses.
+ *
+ *  Not covered: forms that drop interior letters, like "phx" for "phoenix".
+ *  ESPN's own abbreviation field is checked separately for those. */
+function isAbbreviation(abbr: string, phrase: string): boolean {
+  if (!abbr) return false;
+  const words = phrase.split(" ");
+  const walk = (ai: number, wi: number): boolean => {
+    if (wi === words.length) return ai === abbr.length;
+    const word = words[wi]!;
+    for (let take = 1; take <= word.length && ai + take <= abbr.length; take++) {
+      if (!word.startsWith(abbr.slice(ai, ai + take))) break;
+      if (walk(ai + take, wi + 1)) return true;
+    }
+    return false;
+  };
+  return walk(0, 0);
+}
+
+/** Whether two spellings plausibly name the same place: identical, an
+ *  abbreviation of one another in either direction (the row abbreviates for
+ *  "LA Kings", ESPN abbreviates for "LA Clippers"), or one a word-subset of
+ *  the other ("vegas" / "las vegas").
+ *
+ *  Deliberately narrow. It has to still hold "sacramento" and "los angeles"
+ *  apart, or a Sacramento Kings row misfiled into the NHL org would pass the
+ *  check on the strength of the mascot alone — the exact contamination this
+ *  module exists to catch. */
+function sameCity(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (isAbbreviation(a, b) || isAbbreviation(b, a)) return true;
+  const aw = a.split(" ");
+  const bw = b.split(" ");
+  const [short, long] = aw.length <= bw.length ? [aw, bw] : [bw, aw];
+  return short.every((w) => long.includes(w));
+}
+
+/** Second chance for a row whose city form differs from ESPN's: "LA Kings"
+ *  against "Los Angeles Kings", "Los Angeles Clippers" against "LA Clippers".
+ *  The mascot alone is never enough — the city has to corroborate it.
+ *
+ *  Only ever consulted for mascot-style orgs. In college the mascot is not
+ *  unique inside a single conference (three SEC programs are "Tigers"), so
+ *  matching on it there would let a neighbouring school's row pass this org's
+ *  check, which is the leak acceptedNames already refuses to open. */
+function matchesByCityAlias(name: string, roster: LeagueRoster): boolean {
+  const resolved = roster.cityForms.filter(({ mascot, location, abbreviation }) => {
+    if (!name.endsWith(` ${mascot}`)) return false;
+    const city = name.slice(0, -mascot.length).trim();
+    return city === abbreviation || sameCity(city, location);
+  });
+  // Exactly one, so a league that ever does field two same-mascot teams fails
+  // closed rather than picking one of them.
+  return resolved.length === 1;
+}
+
 /** Null means "couldn't get a roster" (network error, ESPN shape changed,
  *  org has no mapped league) — callers must treat that as fail-open, since an
  *  unreachable reference dataset is not evidence that a row is bad. */
-async function fetchLeagueRosterNames(
+async function fetchLeagueRoster(
   org: OrgConfig,
   groupId: number | null,
-): Promise<Set<string> | null> {
+): Promise<LeagueRoster | null> {
   const espnLeaguePath = org.espnLeaguePath!;
   try {
     // limit is load-bearing for college football: the endpoint pages at 50 by
@@ -93,10 +168,18 @@ async function fetchLeagueRosterNames(
     }
 
     const names = new Set<string>();
+    const cityForms: LeagueRoster["cityForms"] = [];
     for (const { team } of teams) {
       for (const n of acceptedNames(team, org.nameStyle)) names.add(n);
+      if (org.nameStyle === "mascot" && team.name && team.location) {
+        cityForms.push({
+          mascot: normalize(team.name),
+          location: normalize(team.location),
+          abbreviation: team.abbreviation ? normalize(team.abbreviation) : null,
+        });
+      }
     }
-    return names;
+    return { names, cityForms };
   } catch {
     return null;
   }
@@ -152,7 +235,7 @@ export async function filterToLeagueRoster(
       if (resolved !== null) groupId = resolved;
     }
 
-    const roster = await fetchLeagueRosterNames(org, groupId);
+    const roster = await fetchLeagueRoster(org, groupId);
     if (!roster) {
       kept.push(...orgRows);
       continue;
@@ -161,7 +244,7 @@ export async function filterToLeagueRoster(
     const ownAccount = org.ownAccountName ? normalize(org.ownAccountName) : null;
     for (const r of orgRows) {
       const key = normalize(r.name);
-      if (key === ownAccount || roster.has(key)) kept.push(r);
+      if (key === ownAccount || roster.names.has(key) || matchesByCityAlias(key, roster)) kept.push(r);
       else dropped.push(r.name);
     }
   }
