@@ -41,8 +41,13 @@ don't decide the list first and rationalize it after. Shape:
                                // this org/angle over the alternatives, any
                                // coverage or platform-count tradeoff you weighed.
   "title": string,            // reads as a headline, under 70 chars
-  "orgSlug": string,          // must appear in the packet
-  "platforms": string[],      // each must appear in that org's platforms.
+  "orgSlugs": string[],       // 1-8, each must appear in the packet. See the
+                               // three list shapes below.
+  "rowKind": "entity" | "org", // what one row is
+  "subgroup": string | null,  // narrows a single org to one of its
+                               // packet.orgs[].subgroups (a division or
+                               // conference), or null for the whole org
+  "platforms": string[],      // each must appear in EVERY listed org's platforms.
                                // Length 1, or 3-4 — never 2 (see taste rules).
                                // Every entity is ranked on the sum across this
                                // exact set, so it must mean the same thing for
@@ -55,8 +60,30 @@ don't decide the list first and rationalize it after. Shape:
   "topN": number,             // even, 4-24 (odd counts split into uneven card columns)
   "sortDir": "desc" | "asc",
   "angle": string,            // why this is worth posting, under 280 chars
-  "caveat": string | null     // shown on the card footer, under 120 chars
+  "caveat": string | null     // framing the numbers need to be read honestly,
+                               // under 120 chars. It goes into the post copy,
+                               // not onto the card — the card states its own
+                               // platforms and window deterministically.
 }
+
+There are three shapes a list can take. Pick the one the finding actually is,
+not the widest one available:
+
+1. One org's entities — orgSlugs: ["nhl-league"], rowKind "entity". The default.
+2. A subgroup of one org — same, plus subgroup: "AFC East". Only names listed in
+   that org's packet.orgs[].subgroups are valid. Note a division is often only
+   4-5 teams, which is a thin list; prefer it when the division itself is the
+   story.
+3. Several orgs at once, one of two ways:
+   - rowKind "entity" pools their individual entities into one ranking. Only
+     legal when every listed org shares the same "family" — an individual team
+     from one league is not a peer of one from another. The four college
+     conferences share a family, so a list spanning all of them is one fair
+     comparison.
+   - rowKind "org" makes each org a row, valued at the sum of its entities.
+     Families may differ here, because every row is the same kind of total.
+     topN must equal the number of orgs, and the metric must have
+     aggregable: true — a rate cannot be summed into an org total.
 
 Each entry in packet.metrics has a pointInTime flag: true means the metric is
 a current-value snapshot and dateRange must be null (e.g. followers); false

@@ -24,6 +24,39 @@ export interface OrgConfig {
    *  see src/fetch/leagueRoster.ts. null for orgs with no such league (e.g.
    *  creators), which skips the check entirely. */
   espnLeaguePath: string | null;
+  /** ESPN conference id, for an org that is one conference inside a larger
+   *  ESPN league — all four Power Four orgs share espnLeaguePath
+   *  "football/college-football" and differ only here. The roster check
+   *  narrows to this conference, which is what lets several conference orgs
+   *  read one Socialpruf workspace and still each rank only their own teams.
+   *  null means the org is the whole league (every pro org today). */
+  espnGroupId: number | null;
+  /** Which half of a team's name identifies it on the card. "mascot" is right
+   *  for the pro leagues, where the mascot is unique league-wide and is what a
+   *  fan says ("Blackhawks"). "school" is required for college, where three
+   *  SEC programs are all "Tigers" — the school is the identity, so a row
+   *  reads "ALABAMA", not "CRIMSON TIDE". Also decides which name forms the
+   *  roster check accepts; see leagueRoster.ts. */
+  nameStyle: "mascot" | "school";
+  /** Which orgs this one's entities may be pooled with in a single ranking.
+   *  Two orgs share a family when an individual entity from one is a fair
+   *  peer of an individual entity from the other — the four Power Four
+   *  conferences are all "college-football", so a 24-row list spanning every
+   *  Power Four program is one comparison. The pro leagues each stand alone:
+   *  an NFL club and an NHL club are not peers on a per-post metric, because
+   *  season length and posting cadence differ more than the clubs do.
+   *  Only constrains rowKind "entity" lists — a rowKind "org" list compares
+   *  whole orgs to each other, where every row is the same kind of total and
+   *  crossing families is the point. */
+  family: string;
+  /** How many entities this org can actually rank, when that differs from
+   *  what the probe can see. The probe counts social accounts, not entities
+   *  (nhl-league: 132 accounts = 33 entities x 4 platforms), and a conference
+   *  org sharing a workspace sees every conference's accounts. Set it and the
+   *  feasibility gate caps topN against the real roster instead of an account
+   *  count, so judgment can't propose a 20-team SEC list that verify would
+   *  then fail. null keeps the probed count. */
+  rosterSize: number | null;
 }
 
 export interface MetricConfig {
@@ -44,6 +77,22 @@ export interface MetricConfig {
    *  metrics (new_followers) are the exception — a real, provable follower
    *  loss is a negative number, not an error. */
   allowNegative: boolean;
+  /** Where the number physically comes from, which the card states under its
+   *  title. "posts" = summed from individual posts (emv, likes); "accounts" =
+   *  read off the account itself (followers, new_followers). Declared here
+   *  rather than inferred from `cadence` or `pointInTime` because neither one
+   *  answers it: new_followers is windowed like emv but no post produces it,
+   *  and saying "collected across every post" of it would put a false
+   *  methodology claim on the card. */
+  sourceBasis: "posts" | "accounts";
+  /** Whether entity values can be added together to describe the whole org,
+   *  which is what a rowKind "org" row is. Counts and currency add up; a rate
+   *  does not — summing sixteen engagement rates produces a number that isn't
+   *  a rate at all, and the weighted average that would be correct needs
+   *  denominators statsByEntity doesn't return. Declared rather than inferred
+   *  from `unit`, for the same reason sourceBasis is: a future ratio metric
+   *  (EMV per post) would be unit "usd" and still not summable. */
+  aggregable: boolean;
 }
 
 /** ---- Awareness ---- */
@@ -66,8 +115,14 @@ export interface AwarenessPacket {
     slug: string;
     label: string;
     entityKind: string;
+    /** Orgs sharing a family may be pooled into one entity ranking. */
+    family: string;
     entityCount: number;
     platforms: string[];
+    /** Named ESPN subgroups this org can be narrowed to (divisions, or the
+     *  conferences inside a whole league). Empty when the org has no ESPN
+     *  league mapped or ESPN reported none. */
+    subgroups: string[];
     freshestDataDate: string | null;
     gaps: string[];
     ownAccountName: string | null;
@@ -76,7 +131,7 @@ export interface AwarenessPacket {
   recentPosts: Array<{
     date: string;
     title: string;
-    orgSlug: string;
+    orgSlugs: string[];
     metric: string;
     platforms: string[];
   }>;
@@ -95,7 +150,33 @@ export const ListSpecSchema = z.object({
         "never shown on the card.",
     ),
   title: z.string().min(4).max(70),
-  orgSlug: z.string(),
+  orgSlugs: z
+    .array(z.string())
+    .min(1)
+    .max(8)
+    .describe(
+      "The universe this list ranks. One org is the common case. Several orgs " +
+        "either pool their entities into one ranking (rowKind 'entity', and " +
+        "they must all share a family) or become the rows themselves " +
+        "(rowKind 'org').",
+    ),
+  rowKind: z
+    .enum(["entity", "org"])
+    .describe(
+      "What one row is. 'entity' ranks the individual teams/creators inside " +
+        "the orgs. 'org' ranks whole orgs against each other, each row being " +
+        "that org's total — which needs an aggregable metric and exactly as " +
+        "many rows as orgs.",
+    ),
+  subgroup: z
+    .string()
+    .nullable()
+    .describe(
+      "Narrows a single org to one of its ESPN subgroups by name (a division " +
+        "or conference, e.g. 'AFC East') — must be one of that org's " +
+        "packet.orgs[].subgroups. null for the whole org. Only valid with " +
+        "exactly one orgSlug and rowKind 'entity'.",
+    ),
   platforms: z
     .array(z.string())
     .min(1)
@@ -141,7 +222,11 @@ export const ListSpecSchema = z.object({
     .string()
     .max(120)
     .nullable()
-    .describe("Shown on the card footer if present"),
+    .describe(
+      "Framing the numbers need to be read honestly. Goes to the caption writer " +
+        "for the post copy, not onto the card — the card's own line under the " +
+        "title states the platforms and window and is generated deterministically.",
+    ),
 });
 
 export type ListSpec = z.infer<typeof ListSpecSchema>;
@@ -150,6 +235,12 @@ export type ListSpec = z.infer<typeof ListSpecSchema>;
 
 export interface RankedRow {
   entityId: string;
+  /** Which org this row came from. Required because a pooled list holds rows
+   *  from several orgs at once, and almost every render-time lookup (ESPN
+   *  index, static color table, short name) is only unambiguous when scoped to
+   *  one league — "Panthers" is a real team in both the NHL and the NFL. For a
+   *  rowKind "org" row this is the org the row *is*. */
+  orgSlug: string;
   name: string;
   handle: string | null;
   value: number;

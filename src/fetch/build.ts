@@ -16,45 +16,79 @@ import type { ListSpec, RankedList, RankedRow } from "../types.js";
  *  different platform-scoped calls before groupBy=brand fixed that). */
 function applyOwnAccountExclusion(rows: RankedRow[], spec: ListSpec): RankedRow[] {
   if (!spec.excludeOwnAccount) return rows;
-  const ownAccountName = getOrg(spec.orgSlug).ownAccountName;
-  if (!ownAccountName) return rows;
-  return rows.filter((r) => r.name.toLowerCase() !== ownAccountName.toLowerCase());
+  return rows.filter((r) => {
+    const own = getOrg(r.orgSlug).ownAccountName;
+    return !own || r.name.toLowerCase() !== own.toLowerCase();
+  });
 }
 
 /** Drops rows config/orgs.json has flagged as confirmed-bad data (e.g.
  *  nfl-league's "Detroit Tigers" — an MLB club misfiled under the NFL org).
  *  Unconditional, unlike applyOwnAccountExclusion: this isn't a per-list
  *  editorial choice, it's removing rows that were never a real entity. */
-function applyBadDataExclusion(rows: RankedRow[], spec: ListSpec): RankedRow[] {
-  const excluded = getOrg(spec.orgSlug).excludeEntityNames.map((n) => n.toLowerCase());
-  if (excluded.length === 0) return rows;
-  return rows.filter((r) => !excluded.includes(r.name.toLowerCase()));
+function applyBadDataExclusion(rows: RankedRow[]): RankedRow[] {
+  return rows.filter((r) => {
+    const excluded = getOrg(r.orgSlug).excludeEntityNames;
+    return !excluded.some((n) => n.toLowerCase() === r.name.toLowerCase());
+  });
+}
+
+/** Collapses each org's surviving entities into a single row for that org.
+ *  Only reached for an aggregable metric — the gate rejects rowKind "org" with
+ *  a rate, because adding rates does not produce a rate. */
+function aggregateByOrg(rows: RankedRow[], spec: ListSpec): RankedRow[] {
+  return spec.orgSlugs.map((slug) => {
+    const org = getOrg(slug);
+    const members = rows.filter((r) => r.orgSlug === slug);
+    return {
+      entityId: slug,
+      orgSlug: slug,
+      name: org.label,
+      handle: null,
+      value: members.reduce((sum, r) => sum + r.value, 0),
+      logoUrl: null,
+      logoUrlFallback: null,
+    };
+  });
 }
 
 export async function buildList(spec: ListSpec): Promise<RankedList> {
   const metric = getMetric(spec.metric);
 
-  const [metricRows, instagramLogos] = await Promise.all([
-    fetchMetricByEntity(spec.orgSlug, spec.platforms, metric.apiField, spec.dateRange),
-    fetchInstagramLogosByName(spec.orgSlug),
-  ]);
-  let rows: RankedRow[] = metricRows.map((r) => ({
-    entityId: r.id,
-    name: r.name,
-    handle: r.handle,
-    value: r.value,
-    logoUrl: r.logoUrl,
-    logoUrlFallback: instagramLogos.get(normalizeBrandName(r.name)) ?? null,
-  }));
+  // One pair of calls per org, in parallel. Each org resolves its own key
+  // inside client.ts, so a pooled list never has to hold more than one.
+  const perOrg = await Promise.all(
+    spec.orgSlugs.map(async (slug) => {
+      const [metricRows, instagramLogos] = await Promise.all([
+        fetchMetricByEntity(slug, spec.platforms, metric.apiField, spec.dateRange),
+        fetchInstagramLogosByName(slug),
+      ]);
+      return metricRows.map(
+        (r): RankedRow => ({
+          entityId: r.id,
+          orgSlug: slug,
+          name: r.name,
+          handle: r.handle,
+          value: r.value,
+          logoUrl: r.logoUrl,
+          logoUrlFallback: instagramLogos.get(normalizeBrandName(r.name)) ?? null,
+        }),
+      );
+    }),
+  );
+
+  let rows: RankedRow[] = perOrg.flat();
   const rawQuery: Record<string, unknown> = {
     route: "statsByEntity",
-    org: spec.orgSlug,
+    orgs: spec.orgSlugs,
+    rowKind: spec.rowKind,
+    ...(spec.subgroup ? { subgroup: spec.subgroup } : {}),
     platforms: spec.platforms,
     metric: spec.metric,
     ...(spec.dateRange ? { start: spec.dateRange.start, end: spec.dateRange.end } : {}),
   };
 
-  rows = applyBadDataExclusion(rows, spec);
+  rows = applyBadDataExclusion(rows);
 
   const rosterCheck = await filterToLeagueRoster(rows, spec);
   rows = rosterCheck.rows;
@@ -63,6 +97,14 @@ export async function buildList(spec: ListSpec): Promise<RankedList> {
   const beforeOwnAccountExclusion = rows.length;
   rows = applyOwnAccountExclusion(rows, spec);
   rawQuery.ownAccountExcluded = spec.excludeOwnAccount && rows.length < beforeOwnAccountExclusion;
+
+  // Aggregate after the exclusions, never before: an org total that still had
+  // a misfiled row or the league's own account folded into it would be wrong
+  // by exactly the amount those rows contribute.
+  if (spec.rowKind === "org") {
+    rawQuery.aggregatedFrom = rows.length;
+    rows = aggregateByOrg(rows, spec);
+  }
 
   rows.sort((a, b) => (spec.sortDir === "desc" ? b.value - a.value : a.value - b.value));
 

@@ -17,12 +17,13 @@ import { tokens as t } from "./tokens.js";
 import { getStaticTeamColor } from "./teamColors.js";
 import {
   fetchLeaderHeadshotUrl,
-  loadEspnLeague,
+  loadEspnLeagues,
+  loadOrgMarkUrl,
   lookupEspnTeam,
   type EspnLeague,
 } from "./espnAssets.js";
 import { getMetric } from "../fetch/keyring.js";
-import type { MetricConfig, RankedList, RankedRow } from "../types.js";
+import type { ListSpec, MetricConfig, RankedList, RankedRow } from "../types.js";
 // Mascot-only short names for the row label (Chicago Blackhawks -> Blackhawks).
 // Shared with fetch/client.ts, which uses the same table to join a
 // brand-grouped entity name to an Instagram-grouped one when the two queries
@@ -257,21 +258,32 @@ interface RowVisual {
   shortName: string | null;
 }
 
+/** A row is only identified by its org *and* id once a list can pool several
+ *  orgs — see RankedRow.orgSlug. */
+function rowKey(r: RankedRow): string {
+  return `${r.orgSlug}:${r.entityId}`;
+}
+
 async function resolveVisuals(
   rows: RankedRow[],
-  orgSlug: string,
-  espn: EspnLeague | null,
+  espnBySlug: Map<string, EspnLeague | null>,
+  orgMarks: Map<string, string | null>,
 ): Promise<Map<string, RowVisual>> {
   const entries = await Promise.all(
     rows.map(async (r): Promise<[string, RowVisual]> => {
-      const espnTeam = lookupEspnTeam(espn, r.name);
+      const espn = espnBySlug.get(r.orgSlug) ?? null;
+      // An org row is not a team and will never match a roster; its mark is
+      // the conference crest, resolved once per org rather than per row.
+      const orgMark = orgMarks.get(r.orgSlug) ?? null;
+      const espnTeam = orgMark ? null : lookupEspnTeam(espn, r.name);
 
       // ESPN's mark first: it is the crest on transparency, which is what the
       // row's light logo panel is designed around. Socialpruf's avatar is a
       // square platform profile picture with its own background — a correct
       // image, but the wrong kind of image for this slot — so it stays as the
       // fallback rather than the primary. See espnAssets.ts.
-      let image = espnTeam?.logoUrl ? await fetchImage(espnTeam.logoUrl) : null;
+      let image = orgMark ? await fetchImage(orgMark) : null;
+      if (!image && espnTeam?.logoUrl) image = await fetchImage(espnTeam.logoUrl);
       if (!image && r.logoUrl) image = await fetchImage(r.logoUrl);
       // Primary failed (dead URL, or an unsupported format like TikTok's
       // WebP) — retry once against the same brand's Instagram avatar before
@@ -288,7 +300,7 @@ async function resolveVisuals(
       // White Sox, Raiders, Spurs, Nets), where #000000 is genuinely correct
       // and now renders as neutral steel rather than a fabricated hue. Pixel
       // extraction stays last, for orgs with no league at all.
-      const knownColor = getStaticTeamColor(orgSlug, r.name) ?? espnTeam?.color ?? null;
+      const knownColor = getStaticTeamColor(r.orgSlug, r.name) ?? espnTeam?.color ?? null;
       const accent = knownColor
         ? legibleHexFromHex(knownColor)
         : image
@@ -296,7 +308,7 @@ async function resolveVisuals(
           : null;
 
       return [
-        r.entityId,
+        rowKey(r),
         { dataUri: toDataUri(image), accent, shortName: espnTeam?.shortName ?? null },
       ];
     }),
@@ -315,21 +327,24 @@ export interface FaceVisual {
  *  the whole list. Any failure just means a shorter panel — see Card. */
 async function resolveFaces(
   rows: RankedRow[],
-  espn: EspnLeague | null,
+  espnBySlug: Map<string, EspnLeague | null>,
   visuals: Map<string, RowVisual>,
 ): Promise<FaceVisual[]> {
-  if (!espn) return [];
   const today = new Date();
 
   const faces = await Promise.all(
     rows.slice(0, t.photo.cells).map(async (r): Promise<FaceVisual | null> => {
+      // Each row's leader is looked up in its own league — an org row has no
+      // roster to have a leader on, and resolves to nothing here.
+      const espn = espnBySlug.get(r.orgSlug) ?? null;
+      if (!espn) return null;
       const team = lookupEspnTeam(espn, r.name);
       if (!team) return null;
       const url = await fetchLeaderHeadshotUrl(espn, team.teamId, today);
       if (!url) return null;
       const dataUri = toDataUri(await fetchImage(url));
       if (!dataUri) return null;
-      return { dataUri, accent: visuals.get(r.entityId)?.accent ?? t.color.accent };
+      return { dataUri, accent: visuals.get(rowKey(r))?.accent ?? t.color.accent };
     }),
   );
 
@@ -354,8 +369,11 @@ function clamp(v: number, [min, max]: [number, number]): number {
  *  size the value pill — Satori will not measure text for us, and every value
  *  pill has to be the same width or the right edge of the card jitters row to
  *  row. Deliberately generous: over-estimating costs a few px of pill, while
- *  under-estimating clips a number, and a clipped number is a wrong number. */
-const ANTON_ADVANCE: Record<string, number> = { ",": 0.26, ".": 0.26, "%": 0.72, $: 0.5, "+": 0.5, "-": 0.32 };
+ *  under-estimating clips a number, and a clipped number is a wrong number.
+ *  "%" is padded well past its true advance on purpose: percent values are
+ *  short, so a pill sized to their real width reads cramped next to the name
+ *  pill. Don't "correct" it back to the measured glyph width. */
+const ANTON_ADVANCE: Record<string, number> = { ",": 0.26, ".": 0.26, "%": 1.0, $: 0.5, "+": 0.5, "-": 0.32 };
 const ANTON_DIGIT_ADVANCE = 0.48;
 
 function estimateWidth(text: string, fontSize: number): number {
@@ -372,6 +390,30 @@ const ANTON_CAP_ADVANCE: Record<string, number> = {
 };
 const ANTON_CAP_DEFAULT = 0.46;
 
+/** Same units, for Inter. Not a nicety: Anton is condensed enough that its
+ *  advances are ~two thirds of Inter's, so measuring an Inter line with the
+ *  Anton table under-counts its wrapped lines — the one error direction that
+ *  pushes the footer off the canvas (see ESTIMATE_SAFETY). */
+const INTER_CAP_ADVANCE: Record<string, number> = {
+  I: 0.3, J: 0.58, L: 0.6, M: 0.88, W: 0.92, " ": 0.28,
+  1: 0.6, ",": 0.28, ".": 0.28, "/": 0.42, "-": 0.36, "'": 0.24,
+};
+const INTER_CAP_DEFAULT = 0.68;
+
+/** A face as the line estimator sees it. `tracking` is in px, not em — it is
+ *  a letterSpacing value copied from the style below, and Satori applies that
+ *  per character on top of the advance. */
+interface CapsFace {
+  advance: Record<string, number>;
+  fallback: number;
+  tracking: number;
+}
+const ANTON_CAPS: CapsFace = { advance: ANTON_CAP_ADVANCE, fallback: ANTON_CAP_DEFAULT, tracking: 0 };
+// The source line's letterSpacing is declared here rather than beside the rest
+// of the header geometry so the estimate and the style read the same number —
+// the JSX below sets letterSpacing from INTER_CAPS.tracking.
+const INTER_CAPS: CapsFace = { advance: INTER_CAP_ADVANCE, fallback: INTER_CAP_DEFAULT, tracking: 1.2 };
+
 /** Deliberately 8% over true width. This feeds the row-height budget, and the
  *  two error directions are not symmetric: over-estimating the line count
  *  makes rows slightly shorter and leaves a little slack above the footer,
@@ -379,10 +421,14 @@ const ANTON_CAP_DEFAULT = 0.46;
  *  and pushes the footer off the canvas. Biased toward the harmless one. */
 const ESTIMATE_SAFETY = 1.08;
 
-function estimateCapsWidth(text: string, fontSize: number): number {
+function estimateCapsWidth(text: string, fontSize: number, face: CapsFace = ANTON_CAPS): number {
   let em = 0;
-  for (const ch of text.toUpperCase()) em += ANTON_CAP_ADVANCE[ch] ?? ANTON_CAP_DEFAULT;
-  return em * fontSize * ESTIMATE_SAFETY;
+  let chars = 0;
+  for (const ch of text.toUpperCase()) {
+    em += face.advance[ch] ?? face.fallback;
+    chars++;
+  }
+  return (em * fontSize + chars * face.tracking) * ESTIMATE_SAFETY;
 }
 
 /** Greedy word wrap, matching what Satori will do with the same string, so the
@@ -391,12 +437,18 @@ function estimateCapsWidth(text: string, fontSize: number): number {
  *  still reserved three lines' worth of space and left a visible band of dead
  *  canvas under the last row. Capped at `maxLines` because the title element
  *  is itself capped there — see Card. */
-function estimateLines(text: string, fontSize: number, width: number, maxLines: number): number {
+function estimateLines(
+  text: string,
+  fontSize: number,
+  width: number,
+  maxLines: number,
+  face: CapsFace = ANTON_CAPS,
+): number {
   let lines = 1;
   let used = 0;
   for (const word of text.split(/\s+/)) {
-    const w = estimateCapsWidth(word, fontSize);
-    const spaced = used === 0 ? w : used + estimateCapsWidth(" ", fontSize) + w;
+    const w = estimateCapsWidth(word, fontSize, face);
+    const spaced = used === 0 ? w : used + estimateCapsWidth(" ", fontSize, face) + w;
     if (spaced > width && used > 0) {
       lines++;
       used = w;
@@ -639,14 +691,19 @@ function Row({
 // because the two have to agree — if the render used one leading and the
 // estimate another, rows would be sized against a header that doesn't exist.
 const TITLE_MAX_LINES = 3;
-const CAVEAT_MAX_LINES = 2;
+// Three, not two, purely as insurance. The worst realistic source line (a
+// 4-platform post-basis one) measures to two lines even in single-column mode,
+// where the photo panel leaves the header its narrowest measure — the third is
+// there so a bad estimate wraps instead of clipping mid-sentence. The header
+// budget in tokens.ts covers all three, so it costs nothing when unused.
+const SOURCE_MAX_LINES = 3;
 // Anton's caps are tall and its default leading leaves a visible band of air
 // between lines; tightening it is what makes a multi-line headline read as one
 // block. Not tighter than this: at 0.92 a comma on one line descended into the
 // caps of the next, which reads as a rendering artifact rather than as style.
 const TITLE_LEADING = 1.05;
-const CAVEAT_LEADING = 1.3;
-const CAVEAT_GAP = 12;
+const SOURCE_LEADING = 1.3;
+const SOURCE_GAP = 12;
 const HEADER_MARGIN = 30;
 
 function footerLine(list: RankedList): string {
@@ -655,8 +712,66 @@ function footerLine(list: RankedList): string {
     ? `${spec.dateRange.start} to ${spec.dateRange.end}`
     : `as of ${list.queriedAt.slice(0, 10)}`;
   // No "socialpruf" text prefix — the wordmark image sitting right next to
-  // this line already carries that.
-  return `${spec.platforms.join("+")} · ${range}`;
+  // this line already carries that. No platform list either: the source line
+  // under the title now names the platforms in full, and repeating them here
+  // as slugs made the card state its inputs twice in two different vocabularies.
+  return range;
+}
+
+/** Display names for the platform slugs Socialpruf returns. A slug that isn't
+ *  listed falls back to capitalizing itself rather than throwing — a new
+ *  platform appearing upstream should read slightly plain on one card, not
+ *  fail a run that has already been paid for. */
+const PLATFORM_LABELS: Record<string, string> = {
+  instagram: "Instagram",
+  tiktok: "TikTok",
+  twitter: "X",
+  x: "X",
+  youtube: "YouTube",
+  snapchat: "Snapchat",
+  facebook: "Facebook",
+};
+
+/** Canonical reading order, so the same platform mix always renders in the
+ *  same order regardless of what order judgment happened to list it in. */
+const PLATFORM_ORDER = ["instagram", "tiktok", "twitter", "x", "youtube", "snapchat", "facebook"];
+
+function platformLabel(slug: string): string {
+  return PLATFORM_LABELS[slug.toLowerCase()] ?? slug.charAt(0).toUpperCase() + slug.slice(1);
+}
+
+/** "Instagram, TikTok, X and YouTube" — an Oxford-comma-free list, because the
+ *  line is set in caps and a trailing comma before "and" reads as noise there. */
+function platformPhrase(platforms: string[]): string {
+  const labels = [...platforms]
+    .sort((a, b) => {
+      const ai = PLATFORM_ORDER.indexOf(a.toLowerCase());
+      const bi = PLATFORM_ORDER.indexOf(b.toLowerCase());
+      return (ai === -1 ? PLATFORM_ORDER.length : ai) - (bi === -1 ? PLATFORM_ORDER.length : bi);
+    })
+    .map(platformLabel);
+  // Dedupe after labelling, not before — "twitter" and "x" are two slugs for
+  // one platform and must not produce "X and X".
+  const unique = [...new Set(labels)];
+  if (unique.length <= 1) return unique[0] ?? "";
+  return `${unique.slice(0, -1).join(", ")} and ${unique[unique.length - 1]}`;
+}
+
+/** The provenance line under the title. Deterministic — it restates the spec's
+ *  own inputs, so it cannot drift from what was actually fetched the way a
+ *  written caveat could.
+ *
+ *  The wording forks on the metric's basis because "collected across every
+ *  post" is a claim, not decoration: it is true of emv or likes, which really
+ *  are summed over posts, and false of followers or new_followers, which are
+ *  account-level counts no post contributes to. Getting that wrong would put a
+ *  false methodology statement on the face of a card whose whole argument is
+ *  that it shows its methodology. */
+function sourceLine(spec: ListSpec, metric: MetricConfig): string {
+  const where = platformPhrase(spec.platforms);
+  return metric.sourceBasis === "posts"
+    ? `Collected across every post on ${where}`
+    : `${metric.label} tracked on ${where}`;
 }
 
 /** Faint diagonal streaks over the background, the way a broadcast graphic
@@ -794,18 +909,19 @@ function Card({
   const values = rows.map((r) => formatValue(r.value, metric));
 
   // What the header will really occupy, not what it is allowed to occupy.
-  // headerBudget stays as the hard ceiling the title/caveat caps enforce; this
+  // headerBudget stays as the hard ceiling the title/source caps enforce; this
   // is the measurement the row list is sized against so a short title gives
   // its unused lines back to the rows instead of leaving dead canvas.
+  const source = sourceLine(spec, metric);
   const titleLines = estimateLines(spec.title, t.type.title, fullWidth, TITLE_MAX_LINES);
-  const caveatLines = spec.caveat
-    ? estimateLines(spec.caveat, t.type.subtitle, fullWidth, CAVEAT_MAX_LINES)
-    : 0;
+  // Measured with the Inter table, not Anton's — this line is set in body type.
+  const sourceLines = estimateLines(source, t.type.source, fullWidth, SOURCE_MAX_LINES, INTER_CAPS);
   const headerHeight = Math.min(
     t.layout.headerBudget,
     Math.round(
       titleLines * t.type.title * TITLE_LEADING +
-        (caveatLines > 0 ? CAVEAT_GAP + caveatLines * t.type.subtitle * CAVEAT_LEADING : 0) +
+        SOURCE_GAP +
+        sourceLines * t.type.source * SOURCE_LEADING +
         HEADER_MARGIN,
     ),
   );
@@ -849,28 +965,32 @@ function Card({
               maxHeight above exactly. Real judgment output has actually hit 3
               wrapped lines at max title length + this font size (confirmed
               against live data), so "should usually fit in 2" isn't safe
-              enough; without a real cap, an unusually long title/caveat pushes
-              the whole row list down and clips the footer off the canvas. */}
+              enough; without a real cap, an unusually long title/source line
+              pushes the row list down and clips the footer off the canvas. */}
           {spec.title.toUpperCase()}
         </div>
-        {spec.caveat ? (
-          <div
-            style={{
-              display: "flex",
-              fontFamily: t.font.body,
-              fontWeight: 700,
-              fontSize: t.type.subtitle,
-              letterSpacing: 1.2,
-              color: t.color.text,
-              marginTop: CAVEAT_GAP,
-              lineHeight: CAVEAT_LEADING,
-              maxHeight: Math.round(t.type.subtitle * CAVEAT_LEADING * CAVEAT_MAX_LINES),
-              overflow: "hidden",
-            }}
-          >
-            {spec.caveat.toUpperCase()}
-          </div>
-        ) : null}
+        {/* Always drawn. It states where the numbers came from, which is true
+            of every list — unlike the old spec.caveat, which the model wrote
+            only sometimes and which now lives in the post copy instead. */}
+        <div
+          style={{
+            display: "flex",
+            fontFamily: t.font.body,
+            fontWeight: 700,
+            fontSize: t.type.source,
+            letterSpacing: INTER_CAPS.tracking,
+            // White, not the footer's dim grey. tokens.ts's design intent is
+            // that the methodology sits on the face of the card rather than
+            // hiding in it — this is that line, so it reads at full contrast.
+            color: t.color.text,
+            marginTop: SOURCE_GAP,
+            lineHeight: SOURCE_LEADING,
+            maxHeight: Math.round(t.type.source * SOURCE_LEADING * SOURCE_MAX_LINES),
+            overflow: "hidden",
+          }}
+        >
+          {source.toUpperCase()}
+        </div>
       </div>
 
       {twoColumn ? (
@@ -909,9 +1029,9 @@ function Card({
                       rank={i + 1}
                       metric={metric}
                       metrics={metrics}
-                      logoDataUri={visuals.get(r.entityId)?.dataUri ?? null}
-                      accentColor={visuals.get(r.entityId)?.accent ?? null}
-                      shortName={visuals.get(r.entityId)?.shortName ?? null}
+                      logoDataUri={visuals.get(rowKey(r))?.dataUri ?? null}
+                      accentColor={visuals.get(rowKey(r))?.accent ?? null}
+                      shortName={visuals.get(rowKey(r))?.shortName ?? null}
                     />
                   ))}
                 </div>
@@ -923,9 +1043,9 @@ function Card({
                       rank={left.length + i + 1}
                       metric={metric}
                       metrics={metrics}
-                      logoDataUri={visuals.get(r.entityId)?.dataUri ?? null}
-                      accentColor={visuals.get(r.entityId)?.accent ?? null}
-                      shortName={visuals.get(r.entityId)?.shortName ?? null}
+                      logoDataUri={visuals.get(rowKey(r))?.dataUri ?? null}
+                      accentColor={visuals.get(rowKey(r))?.accent ?? null}
+                      shortName={visuals.get(rowKey(r))?.shortName ?? null}
                     />
                   ))}
                 </div>
@@ -951,9 +1071,9 @@ function Card({
                 rank={i + 1}
                 metric={metric}
                 metrics={metrics}
-                logoDataUri={visuals.get(r.entityId)?.dataUri ?? null}
-                accentColor={visuals.get(r.entityId)?.accent ?? null}
-                shortName={visuals.get(r.entityId)?.shortName ?? null}
+                logoDataUri={visuals.get(rowKey(r))?.dataUri ?? null}
+                accentColor={visuals.get(rowKey(r))?.accent ?? null}
+                shortName={visuals.get(rowKey(r))?.shortName ?? null}
               />
             ));
           })()}
@@ -1029,14 +1149,26 @@ export async function renderCard(list: RankedList): Promise<{ svg: string; png: 
   // ESPN art direction is best-effort and never blocks: loadEspnLeague returns
   // null on any failure and every consumer treats that as "use what fetch gave
   // us." See espnAssets.ts.
-  const espn = await loadEspnLeague(list.spec.orgSlug);
+  const espnBySlug = await loadEspnLeagues(list.spec.orgSlugs);
+
+  // Only an org-row list needs conference crests, and it needs one per org
+  // rather than one per row.
+  const orgMarks = new Map<string, string | null>(
+    list.spec.rowKind === "org"
+      ? await Promise.all(
+          list.spec.orgSlugs.map(
+            async (slug): Promise<[string, string | null]> => [slug, await loadOrgMarkUrl(slug)],
+          ),
+        )
+      : [],
+  );
 
   const [visuals, fonts, brandLogo] = await Promise.all([
-    resolveVisuals(list.rows, list.spec.orgSlug, espn),
+    resolveVisuals(list.rows, espnBySlug, orgMarks),
     loadFonts(),
     loadBrandLogo(),
   ]);
-  const faces = await resolveFaces(list.rows, espn, visuals);
+  const faces = await resolveFaces(list.rows, espnBySlug, visuals);
 
   const svg = await satori(
     <Card list={list} visuals={visuals} faces={faces} brandLogo={brandLogo} />,

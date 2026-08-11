@@ -55,8 +55,40 @@ export function verify(list: RankedList): VerifyResult {
   }
 
   // Duplicates — the same account tracked twice will silently double-rank.
-  const ids = new Set(rows.map((r) => r.entityId));
+  // Keyed by org as well as id, because a pooled list holds rows from several
+  // orgs and only the pair identifies an entity.
+  const ids = new Set(rows.map((r) => `${r.orgSlug}:${r.entityId}`));
   if (ids.size !== rows.length) failures.push("duplicate entities in the ranking");
+
+  // Two rows that print the same label are indistinguishable to a reader even
+  // when they are genuinely different entities, and the card has no room to
+  // disambiguate them. Checked on the raw name rather than the rendered one —
+  // this layer deliberately doesn't reach into render — which catches the
+  // duplicate-brand case and leaves cross-league mascot collisions to the
+  // family rule in the feasibility gate.
+  const labels = new Map<string, string[]>();
+  for (const r of rows) {
+    const key = r.name.trim().toLowerCase();
+    const seen = labels.get(key);
+    if (seen) seen.push(r.orgSlug);
+    else labels.set(key, [r.orgSlug]);
+  }
+  for (const [label, slugs] of labels) {
+    if (slugs.length > 1) {
+      failures.push(`"${label}" appears ${slugs.length} times (${slugs.join(", ")})`);
+    }
+  }
+
+  // An org row summed from nothing ranks last on an empty total rather than a
+  // real one — which happens when every one of its entities was dropped by the
+  // roster check, and is a wrong ranking rather than a small one.
+  if (spec.rowKind === "org") {
+    for (const r of rows) {
+      if (r.value === 0) {
+        failures.push(`${r.name} totalled zero — it contributed no entities`);
+      }
+    }
+  }
 
   // Near-ties make the ordering meaningless even when it is technically correct.
   for (let i = 0; i < rows.length - 1; i++) {

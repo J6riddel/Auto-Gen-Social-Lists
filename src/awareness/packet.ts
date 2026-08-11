@@ -9,6 +9,7 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import orgsConfig from "../../config/orgs.json" with { type: "json" };
+import { fetchSubgroups } from "../fetch/espnGroups.js";
 import { probeAll } from "./probe.js";
 import type { AwarenessPacket, MetricConfig, OrgConfig } from "../types.js";
 
@@ -47,7 +48,11 @@ async function recentPosts(limit = 10) {
       .map(({ dir, receipt }) => ({
         date: receipt.generatedAt?.slice(0, 10) ?? dir.slice(0, 10),
         title: receipt.spec.title,
-        orgSlug: receipt.spec.orgSlug,
+        // Receipts written before lists could span orgs carry a single
+        // `orgSlug`. Read both shapes so old runs still count for novelty
+        // instead of silently reading as "no org" and letting judgment
+        // repeat itself.
+        orgSlugs: receipt.spec.orgSlugs ?? [receipt.spec.orgSlug].filter(Boolean),
         metric: receipt.spec.metric,
         platforms: receipt.spec.platforms,
       }));
@@ -60,15 +65,39 @@ export async function buildPacket(): Promise<AwarenessPacket> {
   const coverage = await probeAll();
   const byslug = new Map(coverage.map((c) => [c.slug, c]));
 
+  const reachable = ORGS.filter((o) => byslug.get(o.slug)?.reachable);
+
+  // One ESPN round trip per org, cached in espnGroups for the process and
+  // skipped entirely for orgs with no league mapped. Failure yields [], which
+  // reads as "no subgroups offered" rather than breaking the packet.
+  const subgroupsBySlug = new Map<string, string[]>(
+    await Promise.all(
+      reachable.map(async (o): Promise<[string, string[]]> => {
+        if (!o.espnLeaguePath) return [o.slug, []];
+        const subs = await fetchSubgroups(o.espnLeaguePath, o.espnGroupId);
+        return [o.slug, subs.map((s) => s.name)];
+      }),
+    ),
+  );
+
   return {
     today: new Date().toISOString().slice(0, 10),
-    orgs: ORGS.filter((o) => byslug.get(o.slug)?.reachable).map((o) => {
+    orgs: reachable.map((o) => {
       const c = byslug.get(o.slug)!;
       return {
         slug: o.slug,
         label: o.label,
         entityKind: o.entityKind,
-        entityCount: c.entityCount,
+        family: o.family,
+        subgroups: subgroupsBySlug.get(o.slug) ?? [],
+        // The probe counts social accounts, which is not the number of things
+        // that can be ranked — nhl-league's 132 accounts are 33 entities x 4
+        // platforms, and a conference org reading a shared workspace sees
+        // every conference's accounts, not its own 16. Where config declares
+        // the real roster, it wins: this is the number the feasibility gate
+        // caps topN against, so an inflated one lets judgment propose a list
+        // that verify can only fail.
+        entityCount: o.rosterSize ?? c.entityCount,
         platforms: c.platforms,
         freshestDataDate: c.freshestDataDate,
         gaps: c.gaps,

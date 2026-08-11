@@ -5,55 +5,139 @@
       "label": "NHL Teams",
       "keyEnv": "SP_KEY_NHL_LEAGUE",
       "entityKind": "team",
+      "family": "nhl",
       "expectedEntityCount": 132,
       "notes": "132 tracked social accounts = 33 entities (32 clubs + the league account) x 4 platforms (instagram, tiktok, twitter, youtube). One account per platform per entity, not one row per team — confirmed via pnpm probe on 2026-08-06.",
       "ownAccountName": "NHL",
       "excludeEntityNames": [],
-      "espnLeaguePath": "hockey/nhl"
+      "espnLeaguePath": "hockey/nhl",
+      "espnGroupId": null,
+      "nameStyle": "mascot",
+      "rosterSize": 32
     },
     {
       "slug": "nfl-league",
       "label": "NFL Teams",
       "keyEnv": "SP_KEY_NFL_LEAGUE",
       "entityKind": "team",
+      "family": "nfl",
       "expectedEntityCount": 99,
       "notes": "Unlike the other leagues, this key isn't attached to one team workspace — it's split across one workspace per division (NFC North, AFC East, NFC West, NFC East, AFC West, AFC North), 6 of 8 total. AFC South's workspace exists but is empty (0 accounts); NFC South has no workspace at all — so 8 of 32 teams (AFC South + NFC South) aren't tracked yet. client.ts now fans out across every team workspace for an org instead of just the first, which is what surfaced this (previously only NFC North was ever queried, looking like ~4 teams total). NFC North's workspace also carries one confirmed-bad row, 'Detroit Tigers' (an MLB club, not NFL) — listed in excludeEntityNames and dropped in fetch/build.ts, not a per-list judgment call. Net: 99 tracked accounts = 24 real teams + 1 excluded bad row, x 4 platforms. Usable for lists up to topN 24; re-probe once Socialpruf backfills AFC/NFC South — confirmed via pnpm probe + manual per-workspace statsByEntity check on 2026-08-06.",
       "ownAccountName": "NFL",
-      "excludeEntityNames": ["Detroit Tigers"],
-      "espnLeaguePath": "football/nfl"
+      "excludeEntityNames": [
+        "Detroit Tigers"
+      ],
+      "espnLeaguePath": "football/nfl",
+      "espnGroupId": null,
+      "nameStyle": "mascot",
+      "rosterSize": 24
     },
     {
       "slug": "nba-league",
       "label": "NBA Teams",
       "keyEnv": "SP_KEY_NBA_LEAGUE",
       "entityKind": "team",
+      "family": "nba",
       "expectedEntityCount": 125,
       "notes": "125 tracked social accounts = 31 entities (30 clubs + the league's own 'NBA' account) x 4 platforms (instagram, tiktok, twitter, youtube), plus one extra snapchat account that belongs only to the league account, not any club. Avoid selecting snapchat as a ranking platform — it isn't a consistent mix across entities. Team display names are inconsistent across platforms (e.g. 'Lakers' vs 'Los Angeles Lakers'), same as nhl-league, but groupBy=brand resolves that server-side — confirmed via pnpm probe on 2026-08-06.",
       "ownAccountName": "NBA",
       "excludeEntityNames": [],
-      "espnLeaguePath": "basketball/nba"
+      "espnLeaguePath": "basketball/nba",
+      "espnGroupId": null,
+      "nameStyle": "mascot",
+      "rosterSize": 30
     },
     {
       "slug": "mlb-league",
       "label": "MLB Teams",
       "keyEnv": "SP_KEY_MLB_LEAGUE",
       "entityKind": "team",
+      "family": "mlb",
       "expectedEntityCount": 124,
       "notes": "124 tracked social accounts = 31 entities x 4 platforms (instagram, tiktok, twitter, youtube). 30 are MLB clubs; the 31st is 'Savannah Bananas' (not an MLB club — Socialpruf-side data noise), listed in excludeEntityNames and dropped in fetch/build.ts, same pattern as nfl-league's 'Detroit Tigers'. No dedicated 'MLB' league account is tracked today, so ownAccountName is currently a no-op; left set for when Socialpruf adds one. Confirmed via pnpm probe on 2026-08-06.",
       "ownAccountName": "MLB",
-      "excludeEntityNames": ["Savannah Bananas"],
-      "espnLeaguePath": "baseball/mlb"
+      "excludeEntityNames": [
+        "Savannah Bananas"
+      ],
+      "espnLeaguePath": "baseball/mlb",
+      "espnGroupId": null,
+      "nameStyle": "mascot",
+      "rosterSize": 30
     },
     {
       "slug": "creators",
       "label": "Sports Creators",
       "keyEnv": "SP_KEY_CREATORS",
       "entityKind": "creator",
+      "family": "creators",
       "expectedEntityCount": 0,
       "notes": "Roster size varies. Fill expectedEntityCount after the first probe.",
       "ownAccountName": null,
       "excludeEntityNames": [],
-      "espnLeaguePath": null
+      "espnLeaguePath": null,
+      "espnGroupId": null,
+      "nameStyle": "mascot",
+      "rosterSize": null
+    },
+    {
+      "slug": "sec",
+      "label": "SEC Football",
+      "keyEnv": "SP_KEY_PWR4_LEAGUE",
+      "entityKind": "team",
+      "family": "college-football",
+      "expectedEntityCount": 0,
+      "notes": "One of four Power Four conference orgs. All four share SP_KEY_PWR4_LEAGUE and are separated by espnGroupId alone: the roster check narrows each org to its own conference before topN truncation, so one Socialpruf workspace holding every Power Four program produces four correct conference lists. If the conferences end up in separate workspaces instead, give each org its own keyEnv and nothing else changes. rosterSize 16 is the 2026 membership including Texas and Oklahoma. No key set yet — the org is silently absent from the packet until one is, same as creators. Fill expectedEntityCount after the first probe.",
+      "ownAccountName": "SEC",
+      "excludeEntityNames": [],
+      "espnLeaguePath": "football/college-football",
+      "espnGroupId": 8,
+      "nameStyle": "school",
+      "rosterSize": 16
+    },
+    {
+      "slug": "big-ten",
+      "label": "Big Ten Football",
+      "keyEnv": "SP_KEY_PWR4_LEAGUE",
+      "entityKind": "team",
+      "family": "college-football",
+      "expectedEntityCount": 0,
+      "notes": "See the sec org's notes for how the four conference orgs share one key. rosterSize 18 is the 2026 membership — the conference has eighteen schools despite the name, including the four West Coast additions (USC, UCLA, Oregon, Washington). No key set yet. Fill expectedEntityCount after the first probe.",
+      "ownAccountName": "Big Ten",
+      "excludeEntityNames": [],
+      "espnLeaguePath": "football/college-football",
+      "espnGroupId": 5,
+      "nameStyle": "school",
+      "rosterSize": 18
+    },
+    {
+      "slug": "big-12",
+      "label": "Big 12 Football",
+      "keyEnv": "SP_KEY_PWR4_LEAGUE",
+      "entityKind": "team",
+      "family": "college-football",
+      "expectedEntityCount": 0,
+      "notes": "See the sec org's notes for how the four conference orgs share one key. rosterSize 16 is the 2026 membership — sixteen schools despite the name, including the four Pac-12 additions (Arizona, Arizona State, Colorado, Utah). No key set yet. Fill expectedEntityCount after the first probe.",
+      "ownAccountName": "Big 12",
+      "excludeEntityNames": [],
+      "espnLeaguePath": "football/college-football",
+      "espnGroupId": 4,
+      "nameStyle": "school",
+      "rosterSize": 16
+    },
+    {
+      "slug": "acc",
+      "label": "ACC Football",
+      "keyEnv": "SP_KEY_PWR4_LEAGUE",
+      "entityKind": "team",
+      "family": "college-football",
+      "expectedEntityCount": 0,
+      "notes": "See the sec org's notes for how the four conference orgs share one key. rosterSize 17 is the 2026 membership, including Stanford, Cal and SMU. Odd roster, so topN caps at 16 in practice — the schema requires an even count. No key set yet. Fill expectedEntityCount after the first probe.",
+      "ownAccountName": "ACC",
+      "excludeEntityNames": [],
+      "espnLeaguePath": "football/college-football",
+      "espnGroupId": 1,
+      "nameStyle": "school",
+      "rosterSize": 17
     }
   ],
   "metrics": [
@@ -65,7 +149,9 @@
       "caveat": "Point-in-time. One platform, or the same 3-4 platform mix for every entity in the ranking — never a 2-platform mix, and never a different mix per entity.",
       "apiField": "followers",
       "pointInTime": true,
-      "allowNegative": false
+      "allowNegative": false,
+      "sourceBasis": "accounts",
+      "aggregable": true
     },
     {
       "id": "emv",
@@ -75,7 +161,9 @@
       "caveat": "Model output, not observed spend. State the formula when posting.",
       "apiField": "emv",
       "pointInTime": false,
-      "allowNegative": false
+      "allowNegative": false,
+      "sourceBasis": "posts",
+      "aggregable": true
     },
     {
       "id": "engagement_rate",
@@ -85,7 +173,9 @@
       "caveat": "Denominator-sensitive and noisy on a low post count or a short window — prefer emv for ranking unless the spread genuinely holds up.",
       "apiField": "engagementRate",
       "pointInTime": false,
-      "allowNegative": false
+      "allowNegative": false,
+      "sourceBasis": "posts",
+      "aggregable": false
     },
     {
       "id": "new_followers",
@@ -95,7 +185,9 @@
       "caveat": "Net of gained minus lost — can be negative. That's a real finding (an account shrinking), not an error.",
       "apiField": "newFollowers",
       "pointInTime": false,
-      "allowNegative": true
+      "allowNegative": true,
+      "sourceBasis": "accounts",
+      "aggregable": true
     },
     {
       "id": "likes",
@@ -105,7 +197,9 @@
       "caveat": "Raw volume, not rate-adjusted — favors accounts that post more often.",
       "apiField": "likes",
       "pointInTime": false,
-      "allowNegative": false
+      "allowNegative": false,
+      "sourceBasis": "posts",
+      "aggregable": true
     },
     {
       "id": "impressions",
@@ -115,7 +209,9 @@
       "caveat": "Raw reach, not rate-adjusted — favors accounts that post more often.",
       "apiField": "impressions",
       "pointInTime": false,
-      "allowNegative": false
+      "allowNegative": false,
+      "sourceBasis": "posts",
+      "aggregable": true
     }
   ]
 }

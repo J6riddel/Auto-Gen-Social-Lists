@@ -34,7 +34,8 @@ in the replies costs more than a ranking that never shipped.
 - The interesting claim requires a metric we did not actually pull.
 - It ranks entities that are not comparable (different platforms, different
   posting volume, wildly different account ages) without saying so.
-- The angle depends on a caveat too long to fit on the card.
+- The angle depends on a caveat too long to state in the 120 characters
+  `caveat` allows.
 
 ## Judgment calls, not hard rules
 
@@ -60,9 +61,42 @@ in the replies costs more than a ranking that never shipped.
 - Never have different mixes of platforms inside one ranking. One platform per list or the same mix of 3-4. (For expample: No instagram and tiktok vs tiktok and X), prioratize amix that is editorially strong or has the most pure data.
 - If a metric is modelled rather than observed (EMV), or its packet.metrics
   caveat flags it as noisy/denominator-sensitive (engagement rate) or capable
-  of going negative (new followers), say so on the card via `caveat`.
+  of going negative (new followers), say so via `caveat`. That goes into the
+  post copy, not onto the card — the card prints its own source line (which
+  platforms, which window) from the spec, so don't restate those in `caveat`.
 - If coverage is partial, either say "of the N we track" in the title or pick a
   different list.
+
+## College football
+
+- Call a program by its school, not its mascot. "Alabama", "Ohio State", "Ole
+  Miss" — the card already renders it that way, and three SEC programs are
+  named Tigers, so a mascot title is ambiguous on its face.
+- Each conference org ranks only its own members. A cross-conference claim is
+  not a list you can pick here, so don't write a title that implies one.
+- A conference is small enough to rank whole (16-18 schools). Prefer the full
+  conference over a top-10 slice: the bottom of the table is usually the part
+  people argue about, and a slice hides it. The ACC's 17 means topN 16.
+- The sport is seasonal. A window in the off-season measures brand accounts
+  idling, not programs competing — either pick a window inside the season or
+  say which window you used and why it's the interesting one.
+
+## Comparing across orgs
+
+- A pooled list (several orgs, rowKind "entity") is the strongest college post
+  available: the whole Power Four ranked together settles arguments a
+  single-conference list can only start. Prefer it when the cross-conference
+  order is the finding.
+- Conference-vs-conference (rowKind "org") is a different, also good list: four
+  rows, each a whole conference. It answers "which league is actually biggest",
+  which nobody can check without this data. Say plainly in the caveat that each
+  row is the sum of that org's tracked entities, because a reader will assume
+  it's the league's own account otherwise.
+- Never sum a rate. If the interesting claim is about engagement rate, it is a
+  claim about entities, not about orgs.
+- An org total is only as complete as coverage. If one org tracks fewer of its
+  entities than another, the totals aren't comparable and the list is not worth
+  posting — say so or pick something else.
 
 ## Voice
 

@@ -18,6 +18,7 @@
  * claim the card is making, so none of it is worth failing a run over.
  */
 
+import { fetchConferenceTeamIds, fetchGroupLogoUrl } from "../fetch/espnGroups.js";
 import { getOrg } from "../fetch/keyring.js";
 import { canonicalTeamKey } from "../teamNames.js";
 
@@ -54,6 +55,7 @@ interface EspnTeamsResponse {
           name?: string;
           displayName: string;
           shortDisplayName?: string;
+          location?: string;
           color?: string;
           alternateColor?: string;
           logos?: Array<{ href: string; rel: string[] }>;
@@ -65,9 +67,11 @@ interface EspnTeamsResponse {
 
 export interface EspnTeam {
   teamId: string;
-  /** Mascot-only form ("Kings"), straight from ESPN. Authoritative for the
-   *  row label in a way teamNames.ts's table can't be — it comes from the same
-   *  roster the team was matched against, so it can't drift out of date. */
+  /** The row label, straight from ESPN — mascot form ("Kings") for a pro
+   *  league, school form ("Alabama") for a college org, per the org's
+   *  nameStyle. Authoritative in a way teamNames.ts's table can't be: it comes
+   *  from the same roster the team was matched against, so it can't drift out
+   *  of date. */
   shortName: string;
   /** Transparent-background PNG of the team mark. */
   logoUrl: string | null;
@@ -79,15 +83,20 @@ export interface EspnTeam {
 export interface EspnLeague {
   sport: string;
   league: string;
-  /** Keyed by canonicalTeamKey (mascot form) — ESPN's `name` field is already
-   *  the mascot, and row names arrive in either full or short form, so both
-   *  sides route through the same normalizer. Scoped to one league per load,
-   *  which is what makes mascot-only keys safe despite Kings/Rangers/Jets/
-   *  Panthers/Giants/Cardinals colliding across leagues. */
+  /** Keyed by canonicalTeamKey — the mascot form for a pro league (ESPN's
+   *  `name` field is already the mascot) and the school form for a college
+   *  org. Row names arrive in either full or short form, so both sides route
+   *  through the same normalizer. Scoped to one league (or one conference) per
+   *  load, which is what makes mascot-only keys safe despite Kings/Rangers/
+   *  Jets/Panthers/Giants/Cardinals colliding across leagues. */
   teams: Map<string, EspnTeam>;
-  /** Mascot -> team, longest mascot first, for the trailing-mascot fallback
-   *  in lookupEspnTeam. */
+  /** Mascot -> team, longest mascot first, for the trailing-mascot fallback in
+   *  lookupEspnTeam. Empty for a school-style org, where the mascot is not a
+   *  unique key even within one conference. */
   mascots: Array<[string, EspnTeam]>;
+  /** School -> team, longest school first, for the leading-school fallback in
+   *  lookupEspnTeam. Empty for a mascot-style org. */
+  schools: Array<[string, EspnTeam]>;
 }
 
 /** ESPN ships several logo variants per team (see the `rel` tags). The plain
@@ -109,16 +118,38 @@ export async function loadEspnLeague(orgSlug: string): Promise<EspnLeague | null
   const [sport, league] = org.espnLeaguePath.split("/");
   if (!sport || !league) return null;
 
-  const data = await getJson<EspnTeamsResponse>(`${SITE_API}/${org.espnLeaguePath}/teams`);
-  const raw = data?.sports?.[0]?.leagues?.[0]?.teams;
+  // limit: college football pages at 50 by default across 758 schools, which
+  // would silently drop most of a conference. Harmless for the pro leagues.
+  const data = await getJson<EspnTeamsResponse>(
+    `${SITE_API}/${org.espnLeaguePath}/teams?limit=1000`,
+  );
+  let raw = data?.sports?.[0]?.leagues?.[0]?.teams;
   if (!Array.isArray(raw) || raw.length === 0) return null;
+
+  // Narrow a conference org to its own conference, so the index a row is
+  // looked up in holds only that org's teams — the same scoping that makes
+  // short-form keys unambiguous for the pro leagues.
+  if (org.espnGroupId !== null) {
+    const ids = await fetchConferenceTeamIds(org.espnLeaguePath, org.espnGroupId);
+    if (ids) raw = raw.filter(({ team }) => ids.has(team.id));
+    if (raw.length === 0) return null;
+  }
+
+  // In college the school is the identity and the mascot is not unique: three
+  // SEC programs are "Tigers", so a mascot-labelled card would print the same
+  // row three times and the shared index would resolve all three to whichever
+  // was written last. ESPN's `location` is the school ("Alabama", "Ohio
+  // State"), which is both unique in-conference and what a fan actually says.
+  const school = org.nameStyle === "school";
 
   const teams = new Map<string, EspnTeam>();
   const mascots: Array<[string, EspnTeam]> = [];
+  const schools: Array<[string, EspnTeam]> = [];
   for (const { team } of raw) {
+    const primary = school ? team.location : team.name;
     const entry: EspnTeam = {
       teamId: team.id,
-      shortName: team.name ?? team.shortDisplayName ?? team.displayName,
+      shortName: primary ?? team.shortDisplayName ?? team.displayName,
       logoUrl: pickLogo(team.logos),
       color: toHex(team.color),
       altColor: toHex(team.alternateColor),
@@ -126,17 +157,23 @@ export async function loadEspnLeague(orgSlug: string): Promise<EspnLeague | null
     // Every name form the team might arrive as, so a row named "Los Angeles
     // Dodgers" and one named "Dodgers" both resolve. canonicalTeamKey folds
     // full names to the mascot, so these usually collapse to one key anyway.
-    for (const form of [team.name, team.displayName, team.shortDisplayName]) {
+    for (const form of [primary, team.displayName, team.shortDisplayName]) {
       if (form) teams.set(canonicalTeamKey(form), entry);
     }
-    if (team.name) mascots.push([looseName(team.name), entry]);
+    if (school) {
+      if (team.location) schools.push([looseName(team.location), entry]);
+    } else if (team.name) {
+      mascots.push([looseName(team.name), entry]);
+    }
   }
 
-  // Longest mascot first so a two-word mascot wins over a one-word suffix of
-  // itself ("Maple Leafs" before any hypothetical "Leafs").
+  // Longest first so a two-word key wins over a one-word suffix of itself
+  // ("Maple Leafs" before any hypothetical "Leafs"), and so "Michigan State"
+  // is tried before "Michigan" against a row named "Michigan State Football".
   mascots.sort((a, b) => b[0].length - a[0].length);
+  schools.sort((a, b) => b[0].length - a[0].length);
 
-  return { sport, league, teams, mascots };
+  return { sport, league, teams, mascots, schools };
 }
 
 /** Lowercase, punctuation folded to spaces, whitespace collapsed. Folding
@@ -149,6 +186,45 @@ function looseName(name: string): string {
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
 }
+
+/** One index per org, for a list that pools several. Built in parallel and
+ *  independently: a league that fails to load leaves its own rows on the
+ *  Socialpruf avatar without affecting the others. */
+export async function loadEspnLeagues(
+  orgSlugs: string[],
+): Promise<Map<string, EspnLeague | null>> {
+  const entries = await Promise.all(
+    [...new Set(orgSlugs)].map(
+      async (slug): Promise<[string, EspnLeague | null]> => [slug, await loadEspnLeague(slug)],
+    ),
+  );
+  return new Map(entries);
+}
+
+/** The mark for a row that is a whole org — a conference crest rather than a
+ *  team crest. null for an org with no ESPN group of its own (a whole league),
+ *  which has no such image to publish. */
+export async function loadOrgMarkUrl(orgSlug: string): Promise<string | null> {
+  const org = getOrg(orgSlug);
+  if (!org.espnLeaguePath || org.espnGroupId === null) return null;
+  return fetchGroupLogoUrl(org.espnLeaguePath, org.espnGroupId);
+}
+
+/** The only words a leading-school match is allowed to swallow: what a program
+ *  appends to its own name on its own account. Everything else after a school
+ *  name marks a *different* school — "Alabama State" and "Alabama A&M" are not
+ *  Alabama, "Miami OH" is not Miami, "Washington State" is not Washington. That
+ *  distinction cannot be left to the roster check alone, because that check
+ *  fails open when ESPN is unreachable, and the failure it would let through
+ *  here is a card labelled ALABAMA showing Alabama State's numbers. */
+const PROGRAM_SUFFIXES = new Set([
+  "football",
+  "athletics",
+  "sports",
+  "fb",
+  "gameday",
+  "official",
+]);
 
 /** Exact canonical match first, then a trailing-mascot match for the names
  *  Socialpruf writes in a form the shared table doesn't carry — confirmed on
@@ -168,6 +244,20 @@ export function lookupEspnTeam(league: EspnLeague | null, rowName: string): Espn
   if (exact) return exact;
 
   const loose = looseName(rowName);
+  // College accounts lead with the school and trail with a word the roster
+  // doesn't carry — "Alabama Football", "Texas Athletics" — which is the
+  // mirror image of the pro case, so school-style orgs match on the front of
+  // the name and mascot-style ones on the back. Only one list is ever
+  // populated, so the two rules can't fight over the same row.
+  for (const [school, team] of league.schools) {
+    if (loose === school) return team;
+    if (!loose.startsWith(`${school} `)) continue;
+    // Only swallow a remainder that is purely program-suffix words. A row that
+    // continues into anything else is a neighbouring school that merely shares
+    // a prefix, and returning `team` for it would relabel it as this one.
+    const rest = loose.slice(school.length + 1).split(" ").filter(Boolean);
+    if (rest.every((w) => PROGRAM_SUFFIXES.has(w))) return team;
+  }
   for (const [mascot, team] of league.mascots) {
     if (loose === mascot || loose.endsWith(` ${mascot}`)) return team;
   }

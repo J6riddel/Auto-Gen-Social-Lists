@@ -4,10 +4,11 @@
  *
  * Design intent: a broadcast-style ranking graphic that is still a record.
  * Every row carries its entity's own brand color and mark, and the numbers are
- * hard-aligned in fixed-width pills rather than allowed to ragged. The footer
- * carrying source + date + coverage is the signature element — most ranking
- * graphics hide their methodology, and putting it on the face of the card is
- * the whole brand argument.
+ * hard-aligned in fixed-width pills rather than allowed to ragged. The stated
+ * methodology is the signature element — which platforms the numbers came from
+ * sits under the title, the window they cover sits in the footer. Most ranking
+ * graphics hide that, and putting it on the face of the card is the whole
+ * brand argument.
  */
 
 export const tokens = {
@@ -68,12 +69,17 @@ export const tokens = {
   type: {
     title: 92, // Anton is condensed, so this is far larger than the old Inter
     // setting at the same measure — the headline is meant to dominate.
-    subtitle: 24,
+    // The source line under the title ("collected across every post on
+    // Instagram, TikTok, X and YouTube"). Smaller than `subtitle` because it
+    // is a full sentence rather than a fragment: at 24 the widest 4-platform
+    // version needs three lines in single-column mode, where the photo panel
+    // takes a third of the measure. At 20 it lands in two.
+    source: 20,
     rank: 26,
     name: 34,
     value: 34,
-    // Sized to the worst realistic case: the widest platform mix plus a full
-    // date range is ~58 monospace characters, and in single-column mode the
+    // Sized to the worst realistic case, now just a full date range — the
+    // platform mix moved up to the source line. In single-column mode the
     // photo panel leaves the footer only the list column's width to fit that
     // and the wordmark. Larger than this and the date clips.
     footer: 16,
@@ -88,11 +94,11 @@ export const tokens = {
   layout: {
     twoColumnThreshold: 12,
     columnGap: 32,
-    // Fixed cost of everything that isn't the row list: title + caveat +
+    // Fixed cost of everything that isn't the row list: title + source line +
     // margins, and the footer line + its margin. Not a guess — card.tsx hard-
-    // caps the title at 3 lines and the caveat at 2 (maxHeight + overflow:
-    // hidden), and this is sized to match those caps exactly: title
-    // 92*1.05*3 + gap 12 + caveat 24*1.3*2 + marginBottom 30 = ~394, rounded
+    // caps the title at 3 lines and the source line at 3 (maxHeight +
+    // overflow: hidden), and this is sized to match those caps exactly: title
+    // 92*1.05*3 + gap 12 + source 20*1.3*3 + marginBottom 30 = ~410, rounded
     // up for safety. A real max-length title did wrap to 3 lines at this font
     // size — confirmed against live data — so "usually fits in 2" wasn't
     // safe; without a real cap here, a long title pushes the row list down
