@@ -14,6 +14,9 @@ permissions:
 jobs:
   generate:
     runs-on: ubuntu-latest
+    # Only this job writes, and only to history/. The post job stays read-only.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -34,6 +37,47 @@ jobs:
           name: card
           path: output/
           retention-days: 30
+
+      # Runs after the upload deliberately: if pushing history fails, the card
+      # is already safe as an artifact.
+      #
+      # output/ is gitignored and the runner is destroyed at job end, so without
+      # this the novelty history judgment sees in CI is always empty and the
+      # scheduled run can re-propose yesterday's list.
+      - name: Commit history
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain history/)" ]; then
+            echo "No new history — generate found no feasible list."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # generate appends exactly one line per run.
+          LINE=$(tail -n 1 history/posts.jsonl)
+
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git reset --soft origin/main
+
+            # Rebuild from origin and re-append rather than rebasing. Two runs
+            # both appending at EOF is a textbook rebase conflict, and the
+            # resolution we want is always just "keep both lines".
+            rm -f history/posts.jsonl
+            git checkout origin/main -- history/posts.jsonl 2>/dev/null || true
+            mkdir -p history
+            printf '%s\n' "$LINE" >> history/posts.jsonl
+
+            git add history/posts.jsonl
+            git commit -m "history: $(date -u +%F) list"
+            if git push origin HEAD:main; then exit 0; fi
+
+            echo "Push rejected (attempt $attempt) — refetching."
+            sleep 5
+          done
+          exit 1
 
   post:
     needs: generate

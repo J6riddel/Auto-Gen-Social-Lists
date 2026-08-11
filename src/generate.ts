@@ -8,6 +8,7 @@
 
 import "dotenv/config";
 import { mkdir, writeFile } from "node:fs/promises";
+import { appendHistory, historyEntry } from "./awareness/history.js";
 import { buildPacket } from "./awareness/packet.js";
 import { selectList } from "./judgment/select.js";
 import { checkFeasible } from "./feasibility/gate.js";
@@ -83,7 +84,11 @@ async function main() {
   console.log("→ render");
   const { svg, png } = await renderCard(list);
 
-  const dir = `output/${new Date().toISOString().slice(0, 10)}_${slugify(spec.title)}`;
+  // One timestamp for the directory, the receipt and the history line, so the
+  // committed digest and the receipt it summarises can be matched up.
+  const generatedAt = new Date().toISOString();
+
+  const dir = `output/${generatedAt.slice(0, 10)}_${slugify(spec.title)}`;
   await mkdir(dir, { recursive: true });
   await writeFile(`${dir}/card.png`, png);
   await writeFile(`${dir}/card.svg`, svg);
@@ -92,7 +97,7 @@ async function main() {
     `${dir}/receipt.json`,
     JSON.stringify(
       redact({
-        generatedAt: new Date().toISOString(),
+        generatedAt,
         spec,
         rawQuery: list.rawQuery,
         queriedAt: list.queriedAt,
@@ -105,6 +110,11 @@ async function main() {
       2,
     ),
   );
+
+  // Novelty state. Written here rather than in `pnpm post` because judgment
+  // should not re-propose a list it already picked, whether or not that card
+  // survived review.
+  await appendHistory(historyEntry(spec, generatedAt));
 
   console.log(`\n✓ ${dir}`);
   console.log(`  review the card, then: pnpm post ${dir}`);
