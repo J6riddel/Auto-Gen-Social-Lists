@@ -38,6 +38,19 @@ jobs:
           path: output/
           retention-days: 30
 
+      # pnpm install runs husky, which points core.hooksPath at .husky/_, so the
+      # commit below fires the pre-commit hook. Install the scanner rather than
+      # passing --no-verify: the hook is the only thing standing between a
+      # generated artifact and a public repo, and CI is exactly where nobody is
+      # watching. Pinned to match the version developers run locally.
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          VERSION=8.30.1
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
       # Runs after the upload deliberately: if pushing history fails, the card
       # is already safe as an artifact.
       #
