@@ -17,6 +17,8 @@ jobs:
     # Only this job writes, and only to history/. The post job stays read-only.
     permissions:
       contents: write
+    outputs:
+      card: ${{ steps.card.outputs.card }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -26,17 +28,45 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Every org key config/orgs.json knows about. A missing key is not an
+      # error — configuredOrgs() drops the org from the packet silently — so an
+      # omission here shows up only as judgment having fewer orgs to choose
+      # from, and the no-repeat-yesterday rule then starves it into a dead run.
+      # Keep this list in sync with .env.example.
       - run: pnpm generate
         env:
           SP_API_BASE: ${{ secrets.SP_API_BASE }}
           SP_KEY_NHL_LEAGUE: ${{ secrets.SP_KEY_NHL_LEAGUE }}
+          SP_KEY_NFL_LEAGUE: ${{ secrets.SP_KEY_NFL_LEAGUE }}
+          SP_KEY_NBA_LEAGUE: ${{ secrets.SP_KEY_NBA_LEAGUE }}
+          SP_KEY_MLB_LEAGUE: ${{ secrets.SP_KEY_MLB_LEAGUE }}
+          SP_KEY_PWR4_LEAGUE: ${{ secrets.SP_KEY_PWR4_LEAGUE }}
           SP_KEY_CREATORS: ${{ secrets.SP_KEY_CREATORS }}
           SP_ANTHROPIC_KEY: ${{ secrets.SP_ANTHROPIC_KEY }}
+      # generate exits 0 when judgment finds no feasible list — that is a normal
+      # outcome, not a failure, so the job stays green and output/ stays empty.
+      # Without this flag the post job's `needs` is satisfied and it fails on a
+      # missing artifact instead of being skipped.
+      - id: card
+        name: Check for a card
+        run: |
+          set -euo pipefail
+          if ls output/*/card.png >/dev/null 2>&1; then
+            echo "card=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "card=false" >> "$GITHUB_OUTPUT"
+            echo "No card this run — judgment found no feasible list."
+          fi
+
       - uses: actions/upload-artifact@v4
+        if: steps.card.outputs.card == 'true'
         with:
           name: card
           path: output/
           retention-days: 30
+          # The card was just confirmed present, so an empty upload here means
+          # something moved output/ — fail loudly rather than shipping nothing.
+          if-no-files-found: error
 
       # pnpm install runs husky, which points core.hooksPath at .husky/_, so the
       # commit below fires the pre-commit hook. Install the scanner rather than
@@ -94,6 +124,9 @@ jobs:
 
   post:
     needs: generate
+    # A green generate does not imply a card exists. Skip cleanly on the
+    # no-feasible-list days rather than burning the approval gate on a failure.
+    if: needs.generate.outputs.card == 'true'
     runs-on: ubuntu-latest
     # Add yourself as a required reviewer on this environment. The job pauses,
     # you open the artifact, look at the card, and approve. Free on public repos
