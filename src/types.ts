@@ -149,7 +149,16 @@ export const ListSpecSchema = z.object({
         "or platform-count tradeoff considered. Kept in the receipt for audit, " +
         "never shown on the card.",
     ),
-  title: z.string().min(4).max(70),
+  // An outer bound, not the real limit. The card's headline box holds three
+  // lines of Anton and clips the rest via `overflow: hidden` — silently, which
+  // is how a title cut mid-phrase reached a live post while this said 70. What
+  // actually fits depends on which letters are in it and how wide the layout
+  // leaves the headline, so the binding check is render/card.tsx's
+  // titleFitProblem, measuring the real string, enforced by the feasibility
+  // gate. 60 sits above the ~55 the prompt asks for, so a title that would have
+  // rendered fine is never killed here by a blunt character count, and well
+  // below the lengths that cannot fit under any letter mix.
+  title: z.string().min(4).max(60),
   orgSlugs: z
     .array(z.string())
     .min(1)

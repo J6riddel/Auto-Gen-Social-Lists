@@ -40,7 +40,14 @@ don't decide the list first and rationalize it after. Shape:
   "reasoning": string,         // under 500 chars. What the packet supports, why
                                // this org/angle over the alternatives, any
                                // coverage or platform-count tradeoff you weighed.
-  "title": string,            // reads as a headline, under 70 chars
+  "title": string,            // reads as a headline. The card's headline box
+                               // holds exactly 3 lines and clips anything past
+                               // them without warning, so length is a hard
+                               // constraint, not a preference: at most 55
+                               // characters, and at most 31 if topN is under 12
+                               // (a short list gives a third of the card width
+                               // to a photo panel, leaving the headline half
+                               // the measure for the same 3 lines).
   "orgSlugs": string[],       // 1-8, each must appear in the packet. See the
                                // three list shapes below.
   "rowKind": "entity" | "org", // what one row is

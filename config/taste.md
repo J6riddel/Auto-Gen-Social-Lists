@@ -118,4 +118,11 @@ makes it interesting. No "🚨", no "Let that sink in", no rhetorical questions.
 Assume the reader knows the sport. Never explain what EMV is in the post, link
 it if you must.
 
+EMV is Earned Media Value — never "Estimated Media Value", anywhere. When EMV
+is the metric, title the list in plain money terms instead of the acronym:
+"How much each NBA team's social account made", "What every Big Ten program's
+social presence is worth this month". The list itself is unchanged — the normal
+ranking of entities and their values. This framing is the one place a
+question-shaped title is right; no rhetorical questions anywhere else.
+
 Two sentences is usually right. Three is the ceiling.

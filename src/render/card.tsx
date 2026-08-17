@@ -435,13 +435,18 @@ function estimateCapsWidth(text: string, fontSize: number, face: CapsFace = ANTO
  *  row list can be sized against the header this title will actually occupy
  *  rather than against the worst case every time. Without it a two-line title
  *  still reserved three lines' worth of space and left a visible band of dead
- *  canvas under the last row. Capped at `maxLines` because the title element
- *  is itself capped there — see Card. */
+ *  canvas under the last row.
+ *
+ *  Returns the true count, uncapped. It used to clamp to the element's own
+ *  maxLines, which made an overflowing title indistinguishable from one that
+ *  exactly filled its box: the header math saw three lines and was satisfied
+ *  while Satori's `overflow: hidden` quietly ate the fourth, and a headline
+ *  cut mid-phrase went out on a real post. Callers that want the drawn height
+ *  clamp it themselves; titleFitProblem needs the number that wasn't drawn. */
 function estimateLines(
   text: string,
   fontSize: number,
   width: number,
-  maxLines: number,
   face: CapsFace = ANTON_CAPS,
 ): number {
   let lines = 1;
@@ -456,7 +461,7 @@ function estimateLines(
       used = spaced;
     }
   }
-  return Math.min(lines, maxLines);
+  return lines;
 }
 
 interface RowMetrics {
@@ -690,7 +695,53 @@ function Row({
 // sizes the row list. Kept as constants rather than inlined in both places
 // because the two have to agree — if the render used one leading and the
 // estimate another, rows would be sized against a header that doesn't exist.
-const TITLE_MAX_LINES = 3;
+export const TITLE_MAX_LINES = 3;
+
+/** The measure the headline actually gets, which the row count decides. Two
+ *  columns fill the canvas so the title gets the whole width; a single-column
+ *  list gives roughly a third of it to the photo panel and the headline has to
+ *  fit what's left — barely half the room, for the same three lines.
+ *
+ *  Assumes the photo panel is there whenever the layout allows it, even though
+ *  it only appears if ESPN returned a headshot, which isn't known until fetch.
+ *  The two errors aren't symmetric: assuming photos and being wrong costs a
+ *  slightly shorter title than necessary, while assuming none and being wrong
+ *  clips a headline on a card that has already gone out. */
+function headlineWidth(rowCount: number): number {
+  const twoColumn = rowCount >= t.layout.twoColumnThreshold;
+  // Mirrors Card's own photoW, deliberately — if these two ever disagree the
+  // check is measuring a card that isn't the one being drawn.
+  const photoW = twoColumn ? 0 : Math.round(t.size.w * t.photo.widthRatio);
+  return t.size.w - t.space.pad * 2 - photoW;
+}
+
+/** Roughly how many characters fit the headline box at this layout, for the
+ *  prompt and the schema to aim at. Necessarily approximate — Anton's caps run
+ *  from 0.24em (I) to 0.68em (W), so no character count is exact — which is why
+ *  titleFitProblem measures the real string rather than trusting this. Derived
+ *  from the titles in history/ rather than picked: every one of them fits at or
+ *  under these lengths, and the first that don't appear just above. */
+export function titleCharBudget(rowCount: number): number {
+  return rowCount >= t.layout.twoColumnThreshold ? 55 : 31;
+}
+
+/** Why this title won't fit the card, or null if it will.
+ *
+ *  The headline box is capped at TITLE_MAX_LINES with `overflow: hidden`, and
+ *  that combination fails silently — a fourth line isn't an error, it is simply
+ *  absent, so the card renders, verifies, and posts with its headline cut
+ *  mid-phrase. This is what turns that into a rejection the feasibility gate
+ *  can hand back to judgment while a retry is still free. */
+export function titleFitProblem(title: string, rowCount: number): string | null {
+  const lines = estimateLines(title, t.type.title, headlineWidth(rowCount));
+  if (lines <= TITLE_MAX_LINES) return null;
+  return (
+    `title is ${title.length} characters and wraps to ${lines} lines; the card ` +
+    `shows ${TITLE_MAX_LINES} and silently clips the rest, so a ${rowCount}-row ` +
+    `list needs about ${titleCharBudget(rowCount)} characters or fewer`
+  );
+}
+
 // Three, not two, purely as insurance. The worst realistic source line (a
 // 4-platform post-basis one) measures to two lines even in single-column mode,
 // where the photo panel leaves the header its narrowest measure — the third is
@@ -913,9 +964,18 @@ function Card({
   // is the measurement the row list is sized against so a short title gives
   // its unused lines back to the rows instead of leaving dead canvas.
   const source = sourceLine(spec, metric);
-  const titleLines = estimateLines(spec.title, t.type.title, fullWidth, TITLE_MAX_LINES);
+  // Clamped here rather than inside estimateLines: what the header *draws* is
+  // capped, but the estimator has to keep reporting what it measured so
+  // titleFitProblem can see an overflow the box would have hidden.
+  const titleLines = Math.min(
+    estimateLines(spec.title, t.type.title, fullWidth),
+    TITLE_MAX_LINES,
+  );
   // Measured with the Inter table, not Anton's — this line is set in body type.
-  const sourceLines = estimateLines(source, t.type.source, fullWidth, SOURCE_MAX_LINES, INTER_CAPS);
+  const sourceLines = Math.min(
+    estimateLines(source, t.type.source, fullWidth, INTER_CAPS),
+    SOURCE_MAX_LINES,
+  );
   const headerHeight = Math.min(
     t.layout.headerBudget,
     Math.round(

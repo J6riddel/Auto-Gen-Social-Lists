@@ -5,6 +5,7 @@
  * with the problem named.
  */
 
+import { titleFitProblem } from "../render/card.js";
 import type { AwarenessPacket, ListSpec } from "../types.js";
 
 export interface GateResult {
@@ -142,6 +143,15 @@ export function checkFeasible(
       };
     }
   }
+
+  // Last, because it is the cheapest problem to fix and the most local: every
+  // rejection above forces a different list, and a different list comes with a
+  // different title anyway. Checked here at all because the card's headline box
+  // clips rather than errors — without this the run renders, verifies and posts
+  // a title cut mid-phrase, which is exactly the class of silent wrongness the
+  // rest of this pipeline refuses to allow.
+  const titleProblem = titleFitProblem(spec.title, spec.topN);
+  if (titleProblem) return { ok: false, reason: titleProblem };
 
   return { ok: true };
 }
