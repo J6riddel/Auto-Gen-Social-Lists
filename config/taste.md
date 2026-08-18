@@ -125,4 +125,6 @@ social presence is worth this month". The list itself is unchanged — the norma
 ranking of entities and their values. This framing is the one place a
 question-shaped title is right; no rhetorical questions anywhere else.
 
-Two sentences is usually right. Three is the ceiling.
+One sentence is usually right. A second is fine when it is short, a clause
+rather than a thought of its own; the caption has a hard character limit and two
+full sentences do not fit inside it.
