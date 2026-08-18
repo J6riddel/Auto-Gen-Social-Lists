@@ -48,6 +48,18 @@ don't decide the list first and rationalize it after. Shape:
                                // (a short list gives a third of the card width
                                // to a photo panel, leaving the headline half
                                // the measure for the same 3 lines).
+                               //
+                               // You are writing this before any data is
+                               // fetched, so it must not claim how the numbers
+                               // came out. Name the metric, the population and
+                               // the window — never the outcome. "Gaining and
+                               // losing", "winners and losers", "who's up and
+                               // who's down", "surging", "collapsing" are all
+                               // predictions you cannot yet make, and the card
+                               // has to deliver whatever the title promises.
+                               // Declarative, not a question, unless the metric
+                               // is emv. See the editorial standard's title
+                               // rules above.
   "orgSlugs": string[],       // 1-8, each must appear in the packet. See the
                                // three list shapes below.
   "rowKind": "entity" | "org", // what one row is

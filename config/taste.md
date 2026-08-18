@@ -111,6 +111,28 @@ in the replies costs more than a ranking that never shipped.
   entities than another, the totals aren't comparable and the list is not worth
   posting — say so or pick something else.
 
+## Titles
+
+The title is written before any data is fetched, so it cannot claim how the
+numbers turned out. State the metric, the population and the window; never the
+outcome. "Which NFL teams are gaining and losing followers this summer" promises
+a split the rows then have to deliver, and on 2026-08-18 all 24 came back
+positive, so the card asked a question it did not answer. "Winners and losers",
+"who's up and who's down", "surging" and "collapsing" are the same mistake:
+predictions dressed as headlines.
+
+Declarative, not interrogative. A question-shaped title is right in exactly one
+place: when EMV is the metric, title the list in plain money terms instead of
+the acronym — "How much each NBA team's social account made", "What every Big
+Ten program's social presence is worth this month". The list itself is
+unchanged, the normal ranking of entities and their values. Everywhere else the
+title is a statement.
+
+Question framing also eats a character budget the title does not have. "Which
+NFL teams are gaining and losing followers this summer" spends 60 characters of
+a 55 budget on framing alone; "NFL Teams by Net New Followers This Summer"
+spends 42 and says more.
+
 ## Voice
 
 Plain, declarative, a little dry. State the finding, then the one detail that
@@ -118,12 +140,7 @@ makes it interesting. No "🚨", no "Let that sink in", no rhetorical questions.
 Assume the reader knows the sport. Never explain what EMV is in the post, link
 it if you must.
 
-EMV is Earned Media Value — never "Estimated Media Value", anywhere. When EMV
-is the metric, title the list in plain money terms instead of the acronym:
-"How much each NBA team's social account made", "What every Big Ten program's
-social presence is worth this month". The list itself is unchanged — the normal
-ranking of entities and their values. This framing is the one place a
-question-shaped title is right; no rhetorical questions anywhere else.
+EMV is Earned Media Value — never "Estimated Media Value", anywhere.
 
 One sentence is usually right. A second is fine when it is short, a clause
 rather than a thought of its own; the caption has a hard character limit and two
